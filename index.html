@@ -1040,6 +1040,38 @@ let currentExercise = 'squat';
 let poseLandmarker = null;
 let running = false;
 let lastVideoTime = -1;
+
+// --- coordinate 3D e levigatura del movimento ---
+// Oltre ai punti 2D sull'immagine (lm), MediaPipe fornisce anche le stesse
+// articolazioni in coordinate 3D reali (in metri, relative alla fotocamera):
+// wlm. Le uso per gli angoli, perché a differenza delle 2D non si deformano
+// quando il corpo è leggermente ruotato verso la fotocamera. wlm è accessibile
+// da ogni funzione evaluate()/sample() senza doverla passare esplicitamente.
+let wlm = null;
+// Levigatura: i punti tremolano leggermente da un fotogramma all'altro
+// (rumore del modello). Una media mobile esponenziale li stabilizza prima di
+// calcolare angoli/distanze, riducendo ulteriormente falsi positivi e negativi.
+let smoothedLm = null;
+let smoothedWlm = null;
+const SMOOTH_ALPHA = 0.55; // 1 = nessuna levigatura, valori più bassi = più stabile ma più "in ritardo"
+function emaLandmarks(prev, curr, alpha){
+  if(!curr) return null;
+  if(!prev || prev.length !== curr.length) return curr;
+  const out = new Array(curr.length);
+  for(let i = 0; i < curr.length; i++){
+    const p = prev[i], c = curr[i];
+    if(!c){ out[i] = p; continue; }
+    if(!p){ out[i] = c; continue; }
+    out[i] = {
+      x: p.x + (c.x - p.x) * alpha,
+      y: p.y + (c.y - p.y) * alpha,
+      z: (c.z != null && p.z != null) ? p.z + (c.z - p.z) * alpha : c.z,
+      visibility: c.visibility // la confidenza usa sempre il valore più recente, non va levigata
+    };
+  }
+  return out;
+}
+
 let facingMode = 'environment';
 let appState = 'idle'; // idle | calibrating | active
 let calibStableSince = null;
@@ -1296,9 +1328,9 @@ const EXERCISES = {
     calib: {
       steps: [
         { prompt: "Stai in piedi, gambe dritte, di lato alla fotocamera.",
-          sample(lm){ const s = pickSide(lm); return { knee: angleBetween(s.hip, s.knee, s.ankle), back: angleFromVertical(s.shoulder, s.hip) }; } },
+          sample(lm){ const s = pickSide3D(lm); return { knee: angleBetween(s.hip, s.knee, s.ankle), back: angleFromVertical(s.shoulder, s.hip) }; } },
         { prompt: "Scendi nello squat più profondo che consideri corretto e resta fermo.",
-          sample(lm){ const s = pickSide(lm); return { knee: angleBetween(s.hip, s.knee, s.ankle), back: angleFromVertical(s.shoulder, s.hip) }; } }
+          sample(lm){ const s = pickSide3D(lm); return { knee: angleBetween(s.hip, s.knee, s.ankle), back: angleFromVertical(s.shoulder, s.hip) }; } }
       ],
       apply(vals, t){
         const standKnee = Math.max(vals[0].knee, vals[1].knee);
@@ -1314,7 +1346,7 @@ const EXERCISES = {
     },
     evaluate(lm){
       const t = this.thresholds;
-      const s = pickSide(lm);
+      const s = pickSide3D(lm);
       const kneeAngle = angleBetween(s.hip, s.knee, s.ankle);
       const backAngle = angleFromVertical(s.shoulder, s.hip);
       if(kneeAngle == null) return null;
@@ -1323,10 +1355,13 @@ const EXERCISES = {
       const backOk = backAngle <= t.backMax;
       const kneeOverToe = kneeOverToeRatio(s.ankle, s.knee, s.toe);
       const kneeOverToeBad = kneeOverToe !== null && kneeOverToe > 1.15;
+      const kneeDrift = kneeLateralDriftM(s.hip, s.knee, s.ankle);
+      const kneeDriftBad = kneeDrift !== null && Math.abs(kneeDrift) > 0.09;
       const issues = [];
       if(!kneeOk) issues.push('Sei sceso troppo: rischio sulle ginocchia, risali leggermente.');
       if(!backOk) issues.push('Busto troppo inclinato in avanti: tieni il petto più alto.');
       if(kneeOverToeBad) issues.push('Il ginocchio supera troppo la punta del piede: sposta il peso verso i talloni.');
+      if(kneeDriftBad) issues.push('Il ginocchio si sposta lateralmente rispetto alla linea anca-caviglia: mantienilo allineato.');
       const ok = issues.length === 0;
 
       if(exState.phase === undefined){ exState.phase = 'up'; exState.repHadIssue = false; exState.issueSince = null; }
@@ -1375,9 +1410,9 @@ const EXERCISES = {
     calib: {
       steps: [
         { prompt: "Stai in piedi, gambe dritte, di lato alla fotocamera.",
-          sample(lm){ const kneeL = angleBetween(lm[23], lm[25], lm[27]); const kneeR = angleBetween(lm[24], lm[26], lm[28]); const s = pickSide(lm); return { knee: Math.min(kneeL, kneeR), back: angleFromVertical(s.shoulder, s.hip) }; } },
+          sample(lm){ const a = al(lm); const kneeL = angleBetween(a[23], a[25], a[27]); const kneeR = angleBetween(a[24], a[26], a[28]); const s = pickSide3D(lm); return { knee: Math.min(kneeL, kneeR), back: angleFromVertical(s.shoulder, s.hip) }; } },
         { prompt: "Scendi nell'affondo più profondo che consideri corretto e resta fermo.",
-          sample(lm){ const kneeL = angleBetween(lm[23], lm[25], lm[27]); const kneeR = angleBetween(lm[24], lm[26], lm[28]); const s = pickSide(lm); return { knee: Math.min(kneeL, kneeR), back: angleFromVertical(s.shoulder, s.hip) }; } }
+          sample(lm){ const a = al(lm); const kneeL = angleBetween(a[23], a[25], a[27]); const kneeR = angleBetween(a[24], a[26], a[28]); const s = pickSide3D(lm); return { knee: Math.min(kneeL, kneeR), back: angleFromVertical(s.shoulder, s.hip) }; } }
       ],
       apply(vals, t){
         const standKnee = Math.max(vals[0].knee, vals[1].knee);
@@ -1393,23 +1428,29 @@ const EXERCISES = {
     },
     evaluate(lm){
       const t = this.thresholds;
-      const kneeL = angleBetween(lm[23], lm[25], lm[27]);
-      const kneeR = angleBetween(lm[24], lm[26], lm[28]);
+      const a = al(lm);
+      const kneeL = angleBetween(a[23], a[25], a[27]);
+      const kneeR = angleBetween(a[24], a[26], a[28]);
       if(kneeL == null || kneeR == null) return null;
       const workingKnee = Math.min(kneeL, kneeR);
       const workingLeft = kneeL <= kneeR;
-      const s = pickSide(lm);
+      const s = pickSide3D(lm);
       const backAngle = angleFromVertical(s.shoulder, s.hip);
       const kneeOverToe = workingLeft
-        ? kneeOverToeRatio(lm[27], lm[25], lm[31])
-        : kneeOverToeRatio(lm[28], lm[26], lm[32]);
+        ? kneeOverToeRatio(a[27], a[25], a[31])
+        : kneeOverToeRatio(a[28], a[26], a[32]);
       const kneeOverToeBad = kneeOverToe !== null && kneeOverToe > 1.15;
+      const kneeDrift = workingLeft
+        ? kneeLateralDriftM(a[23], a[25], a[27])
+        : kneeLateralDriftM(a[24], a[26], a[28]);
+      const kneeDriftBad = kneeDrift !== null && Math.abs(kneeDrift) > 0.09;
 
       const kneeOk = workingKnee >= t.kneeMin;
       const backOk = backAngle <= t.backMax;
       const issues = [];
       if(!kneeOk) issues.push('Ginocchio anteriore troppo piegato: rischio articolare, risali leggermente.');
       if(!backOk) issues.push('Busto troppo inclinato: mantieni il tronco più eretto.');
+      if(kneeDriftBad) issues.push('Il ginocchio anteriore si sposta lateralmente: mantienilo allineato con anca e caviglia.');
       if(kneeOverToeBad) issues.push('Il ginocchio anteriore supera troppo la punta del piede: fai un passo più lungo.');
       const ok = issues.length === 0;
 
@@ -1459,9 +1500,9 @@ const EXERCISES = {
     calib: {
       steps: [
         { prompt: "Braccia completamente estese, corpo in linea retta, di lato alla fotocamera.",
-          sample(lm){ const s = pickSide(lm); return { elbow: angleBetween(s.shoulder, s.elbow, s.wrist), body: angleBetween(s.shoulder, s.hip, s.ankle) }; } },
+          sample(lm){ const s = pickSide3D(lm); return { elbow: angleBetween(s.shoulder, s.elbow, s.wrist), body: angleBetween(s.shoulder, s.hip, s.ankle) }; } },
         { prompt: "Scendi fino alla profondità massima che consideri corretta e resta fermo.",
-          sample(lm){ const s = pickSide(lm); return { elbow: angleBetween(s.shoulder, s.elbow, s.wrist), body: angleBetween(s.shoulder, s.hip, s.ankle) }; } }
+          sample(lm){ const s = pickSide3D(lm); return { elbow: angleBetween(s.shoulder, s.elbow, s.wrist), body: angleBetween(s.shoulder, s.hip, s.ankle) }; } }
       ],
       apply(vals, t){
         const extended = Math.max(vals[0].elbow, vals[1].elbow);
@@ -1479,7 +1520,7 @@ const EXERCISES = {
     },
     evaluate(lm){
       const t = this.thresholds;
-      const s = pickSide(lm);
+      const s = pickSide3D(lm);
       const elbowAngle = angleBetween(s.shoulder, s.elbow, s.wrist);
       const bodyAngle = angleBetween(s.shoulder, s.hip, s.ankle);
       if(elbowAngle == null || bodyAngle == null) return null;
@@ -1537,7 +1578,7 @@ const EXERCISES = {
     calib: {
       steps: [
         { prompt: "Mantieni la posizione di plank corretta, corpo dritto da spalle a caviglie.",
-          sample(lm){ const s = pickSide(lm); return { body: angleBetween(s.shoulder, s.hip, s.ankle) }; } }
+          sample(lm){ const s = pickSide3D(lm); return { body: angleBetween(s.shoulder, s.hip, s.ankle) }; } }
       ],
       apply(vals, t){
         const ref = vals[0].body;
@@ -1547,7 +1588,7 @@ const EXERCISES = {
     },
     evaluate(lm){
       const t = this.thresholds;
-      const s = pickSide(lm);
+      const s = pickSide3D(lm);
       const bodyAngle = angleBetween(s.shoulder, s.hip, s.ankle);
       if(bodyAngle == null) return null;
 
@@ -1586,7 +1627,7 @@ const EXERCISES = {
     calib: {
       steps: [
         { prompt: "Mantieni la posizione di plank laterale corretta, corpo allineato.",
-          sample(lm){ const s = pickSide(lm); return { body: angleBetween(s.shoulder, s.hip, s.ankle) }; } }
+          sample(lm){ const s = pickSide3D(lm); return { body: angleBetween(s.shoulder, s.hip, s.ankle) }; } }
       ],
       apply(vals, t){
         const ref = vals[0].body;
@@ -1596,7 +1637,7 @@ const EXERCISES = {
     },
     evaluate(lm){
       const t = this.thresholds;
-      const s = pickSide(lm);
+      const s = pickSide3D(lm);
       const bodyAngle = angleBetween(s.shoulder, s.hip, s.ankle);
       if(bodyAngle == null) return null;
 
@@ -1632,9 +1673,9 @@ const EXERCISES = {
     calib: {
       steps: [
         { prompt: "Sdraiato a terra, bacino appoggiato, ginocchia piegate.",
-          sample(lm){ const s = pickSide(lm); return { hip: angleBetween(s.shoulder, s.hip, s.knee), knee: angleBetween(s.hip, s.knee, s.ankle) }; } },
+          sample(lm){ const s = pickSide3D(lm); return { hip: angleBetween(s.shoulder, s.hip, s.knee), knee: angleBetween(s.hip, s.knee, s.ankle) }; } },
         { prompt: "Solleva il bacino il più possibile mantenendo la forma corretta.",
-          sample(lm){ const s = pickSide(lm); return { hip: angleBetween(s.shoulder, s.hip, s.knee), knee: angleBetween(s.hip, s.knee, s.ankle) }; } }
+          sample(lm){ const s = pickSide3D(lm); return { hip: angleBetween(s.shoulder, s.hip, s.knee), knee: angleBetween(s.hip, s.knee, s.ankle) }; } }
       ],
       apply(vals, t){
         const hipLow = Math.min(vals[0].hip, vals[1].hip);
@@ -1652,7 +1693,7 @@ const EXERCISES = {
     },
     evaluate(lm){
       const t = this.thresholds;
-      const s = pickSide(lm);
+      const s = pickSide3D(lm);
       const hipAngle = angleBetween(s.shoulder, s.hip, s.knee);
       const kneeAngle = angleBetween(s.hip, s.knee, s.ankle);
       if(hipAngle == null || kneeAngle == null) return null;
@@ -1781,14 +1822,15 @@ const EXERCISES = {
     metricLabels: ['Ginocchio in movimento', 'Linea plank'],
     muscles: { visual:['core','shoulders','thighs'], text:['Core','Spalle','Flessori dell\'anca','Gambe','Sistema cardiovascolare'] },
     evaluate(lm){
-      const kneeL = angleBetween(lm[23], lm[25], lm[27]);
-      const kneeR = angleBetween(lm[24], lm[26], lm[28]);
+      const a = al(lm);
+      const kneeL = angleBetween(a[23], a[25], a[27]);
+      const kneeR = angleBetween(a[24], a[26], a[28]);
       if(kneeL == null || kneeR == null) return null;
       const workingKnee = Math.min(kneeL, kneeR);
       const extendedIsLeft = kneeL >= kneeR;
       const s = extendedIsLeft
-        ? { shoulder: lm[11], hip: lm[23], ankle: lm[27] }
-        : { shoulder: lm[12], hip: lm[24], ankle: lm[28] };
+        ? { shoulder: a[11], hip: a[23], ankle: a[27] }
+        : { shoulder: a[12], hip: a[24], ankle: a[28] };
       const plankAngle = angleBetween(s.shoulder, s.hip, s.ankle);
       if(plankAngle == null) return null;
 
@@ -1839,10 +1881,14 @@ const EXERCISES = {
     metricLabels: ['Altezza anca', 'Fase'],
     muscles: { visual:['chest','arms','shoulders','core','thighs','calves'], text:['Corpo intero — Pettorali','Gambe','Core','Spalle','Sistema cardiovascolare'] },
     evaluate(lm){
-      const s = pickSide(lm);
-      const kneeAngle = angleBetween(s.hip, s.knee, s.ankle);
-      if(kneeAngle == null || s.hip.y == null) return null;
-      const hipY = s.hip.y; // 0 = alto del frame, 1 = basso del frame
+      // qui servono sia l'angolo (più robusto in 3D) sia la posizione verticale
+      // sullo schermo (ha senso solo in 2D, è letteralmente "quanto in alto/basso
+      // nell'inquadratura", non un dato di profondità reale)
+      const s2d = pickSide(lm);
+      const s3d = pickSide3D(lm);
+      const kneeAngle = angleBetween(s3d.hip, s3d.knee, s3d.ankle);
+      if(kneeAngle == null || s2d.hip.y == null) return null;
+      const hipY = s2d.hip.y; // 0 = alto del frame, 1 = basso del frame
 
       if(exState.phase === undefined) exState.phase = 'up';
       const isDown = hipY > 0.62 || kneeAngle < 70;
@@ -1883,9 +1929,9 @@ const EXERCISES = {
     calib: {
       steps: [
         { prompt: "Sdraiato a terra, busto disteso, ginocchia piegate.",
-          sample(lm){ const s = pickSide(lm); return { torso: angleBetween(s.shoulder, s.hip, s.knee) }; } },
+          sample(lm){ const s = pickSide3D(lm); return { torso: angleBetween(s.shoulder, s.hip, s.knee) }; } },
         { prompt: "Sali con il busto fino alla contrazione massima corretta.",
-          sample(lm){ const s = pickSide(lm); return { torso: angleBetween(s.shoulder, s.hip, s.knee) }; } }
+          sample(lm){ const s = pickSide3D(lm); return { torso: angleBetween(s.shoulder, s.hip, s.knee) }; } }
       ],
       apply(vals, t){
         const rest = Math.max(vals[0].torso, vals[1].torso);
@@ -1899,7 +1945,7 @@ const EXERCISES = {
     },
     evaluate(lm){
       const t = this.thresholds;
-      const s = pickSide(lm);
+      const s = pickSide3D(lm);
       const torsoAngle = angleBetween(s.shoulder, s.hip, s.knee);
       if(torsoAngle == null) return null;
       const curled = torsoAngle < t.curledMax;
@@ -1946,9 +1992,9 @@ const EXERCISES = {
     calib: {
       steps: [
         { prompt: "Sdraiato a terra, gambe distese sul pavimento.",
-          sample(lm){ const s = pickSide(lm); return { hip: angleBetween(s.shoulder, s.hip, s.ankle) }; } },
+          sample(lm){ const s = pickSide3D(lm); return { hip: angleBetween(s.shoulder, s.hip, s.ankle) }; } },
         { prompt: "Solleva le gambe fino alla posizione corretta (circa 90°) e resta fermo.",
-          sample(lm){ const s = pickSide(lm); return { hip: angleBetween(s.shoulder, s.hip, s.ankle) }; } }
+          sample(lm){ const s = pickSide3D(lm); return { hip: angleBetween(s.shoulder, s.hip, s.ankle) }; } }
       ],
       apply(vals, t){
         const rest = Math.max(vals[0].hip, vals[1].hip);
@@ -1962,7 +2008,7 @@ const EXERCISES = {
     },
     evaluate(lm){
       const t = this.thresholds;
-      const s = pickSide(lm);
+      const s = pickSide3D(lm);
       const hipAngle = angleBetween(s.shoulder, s.hip, s.ankle);
       if(hipAngle == null) return null;
       const raised = hipAngle < t.raisedMax;
@@ -2132,7 +2178,7 @@ const EXERCISES = {
     calib: {
       steps: [
         { prompt: "Scendi nella posizione di sedia a muro corretta (ginocchia a circa 90°) e resta fermo.",
-          sample(lm){ const s = pickSide(lm); return { knee: angleBetween(s.hip, s.knee, s.ankle) }; } }
+          sample(lm){ const s = pickSide3D(lm); return { knee: angleBetween(s.hip, s.knee, s.ankle) }; } }
       ],
       apply(vals, t){
         const ref = vals[0].knee;
@@ -2142,7 +2188,7 @@ const EXERCISES = {
     },
     evaluate(lm){
       const t = this.thresholds;
-      const s = pickSide(lm);
+      const s = pickSide3D(lm);
       const kneeAngle = angleBetween(s.hip, s.knee, s.ankle);
       if(kneeAngle == null) return null;
       const ok = kneeAngle >= t.kneeMin && kneeAngle <= t.kneeMax;
@@ -2175,9 +2221,9 @@ const EXERCISES = {
     calib: {
       steps: [
         { prompt: "Braccia distese, seduto sul bordo della sedia, di lato alla fotocamera.",
-          sample(lm){ const s = pickSide(lm); return { elbow: angleBetween(s.shoulder, s.elbow, s.wrist) }; } },
+          sample(lm){ const s = pickSide3D(lm); return { elbow: angleBetween(s.shoulder, s.elbow, s.wrist) }; } },
         { prompt: "Scendi fino alla profondità massima che consideri corretta e resta fermo.",
-          sample(lm){ const s = pickSide(lm); return { elbow: angleBetween(s.shoulder, s.elbow, s.wrist) }; } }
+          sample(lm){ const s = pickSide3D(lm); return { elbow: angleBetween(s.shoulder, s.elbow, s.wrist) }; } }
       ],
       apply(vals, t){
         const extended = Math.max(vals[0].elbow, vals[1].elbow);
@@ -2191,7 +2237,7 @@ const EXERCISES = {
     },
     evaluate(lm){
       const t = this.thresholds;
-      const s = pickSide(lm);
+      const s = pickSide3D(lm);
       const elbowAngle = angleBetween(s.shoulder, s.elbow, s.wrist);
       if(elbowAngle == null) return null;
       const elbowOk = elbowAngle >= t.elbowMin;
@@ -3105,6 +3151,19 @@ function pickSide(lm){
   return visSum(L) >= visSum(R) ? L : R;
 }
 
+// Come pickSide, ma per gli angoli: usa le coordinate 3D reali (wlm, in metri,
+// aggiornate ogni fotogramma) quando disponibili, così le misure non si
+// deformano se il corpo è leggermente ruotato verso la fotocamera. Ripiega
+// sulle 2D (l'argomento lm) solo se le 3D non sono ancora pronte.
+function pickSide3D(lm){
+  return pickSide(wlm || lm);
+}
+// Landmark "per gli angoli": stessa logica di pickSide3D ma per gli accessi
+// diretti per indice (es. al(lm)[23]) usati da alcuni esercizi.
+function al(lm){
+  return wlm || lm;
+}
+
 // quanto il ginocchio supera la punta del piede lungo la direzione caviglia→punta (in unità di lunghezza del piede)
 function kneeOverToeRatio(ankle, knee, toe){
   if(!ankle || !knee || !toe) return null;
@@ -3115,6 +3174,22 @@ function kneeOverToeRatio(ankle, knee, toe){
   const kneeVec = { x: knee.x - ankle.x, y: knee.y - ankle.y };
   const projection = kneeVec.x * dir.x + kneeVec.y * dir.y;
   return projection / footLen;
+}
+
+// Rileva il ginocchio che "cade" verso l'interno o si allarga verso l'esterno
+// (valgismo/varismo), usando l'asse di profondità 3D (z, in metri): da una
+// fotocamera laterale, l'asse verso/lontano dall'obiettivo corrisponde al
+// piano sinistra-destra del corpo, quindi è proprio lì che si vede lo
+// spostamento laterale del ginocchio che in 2D (solo x/y dell'immagine) non
+// sarebbe visibile. Richiede punti 3D (world landmarks): torna null altrimenti.
+function kneeLateralDriftM(hip, knee, ankle){
+  if(!hip || !knee || !ankle) return null;
+  if(hip.z == null || knee.z == null || ankle.z == null) return null;
+  const totalY = ankle.y - hip.y;
+  if(Math.abs(totalY) < 1e-4) return null;
+  const frac = Math.min(1, Math.max(0, (knee.y - hip.y) / totalY)); // 0=anca, 1=caviglia
+  const expectedZ = hip.z + (ankle.z - hip.z) * frac;
+  return knee.z - expectedZ; // metri: quanto il ginocchio si scosta dalla linea anca-caviglia attesa
 }
 
 // vera vista laterale attesa: spalle "compresse" in larghezza nell'immagine rispetto alla lunghezza della gamba.
@@ -3219,7 +3294,17 @@ function renderLoop(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
   const hasPerson = result.landmarks && result.landmarks.length > 0;
-  const lm = hasPerson ? result.landmarks[0] : null;
+  const rawLm = hasPerson ? result.landmarks[0] : null;
+  const rawWlm = hasPerson && result.worldLandmarks ? result.worldLandmarks[0] : null;
+  if(hasPerson){
+    smoothedLm = emaLandmarks(smoothedLm, rawLm, SMOOTH_ALPHA);
+    smoothedWlm = emaLandmarks(smoothedWlm, rawWlm, SMOOTH_ALPHA);
+  } else {
+    smoothedLm = null;
+    smoothedWlm = null;
+  }
+  const lm = smoothedLm;
+  wlm = smoothedWlm;
 
   if(isResting) return; // durante il riposo non valutiamo l'esercizio, la fotocamera resta solo in anteprima
 
