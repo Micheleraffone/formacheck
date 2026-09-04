@@ -579,12 +579,18 @@
     <div class="calib-overlay" id="circuitSummaryOverlay" style="display:none;">
       <div class="calib-title">Circuito completato 🎉</div>
       <div id="circuitSummaryList" style="width:100%; max-width:280px;"></div>
-      <button class="calib-skip" id="circuitSummaryCloseBtn">Chiudi</button>
+      <div style="display:flex; gap:10px;">
+        <button class="calib-skip" id="circuitSummaryShareBtn">Condividi</button>
+        <button class="calib-skip" id="circuitSummaryCloseBtn">Chiudi</button>
+      </div>
     </div>
     <div class="calib-overlay" id="sessionSummaryOverlay" style="display:none;">
       <div class="calib-title">Riepilogo</div>
       <div id="sessionSummaryBody" style="width:100%; max-width:280px; display:flex; flex-direction:column; gap:10px;"></div>
-      <button class="calib-skip" id="sessionSummaryCloseBtn">Chiudi</button>
+      <div style="display:flex; gap:10px;">
+        <button class="calib-skip" id="sessionSummaryShareBtn">Condividi</button>
+        <button class="calib-skip" id="sessionSummaryCloseBtn">Chiudi</button>
+      </div>
     </div>
     <div class="calib-overlay" id="historyOverlay" style="display:none;">
       <div class="calib-title">Cronologia allenamenti</div>
@@ -633,6 +639,8 @@
         <div class="view-badge-note" id="viewNote">Posizionati di lato all'obiettivo.</div>
       </div>
     </div>
+
+    <div class="calib-status-note" id="recordBadge" style="display:none; text-align:center;"></div>
 
     <div class="howto-panel">
       <button class="howto-toggle" id="howtoToggle" aria-expanded="false">
@@ -804,10 +812,13 @@ const circuitIntroLabel = document.getElementById('circuitIntroLabel');
 const circuitIntroTarget = document.getElementById('circuitIntroTarget');
 const circuitSummaryOverlay = document.getElementById('circuitSummaryOverlay');
 const circuitSummaryList = document.getElementById('circuitSummaryList');
+const circuitSummaryShareBtn = document.getElementById('circuitSummaryShareBtn');
 const circuitSummaryCloseBtn = document.getElementById('circuitSummaryCloseBtn');
 const sessionSummaryOverlay = document.getElementById('sessionSummaryOverlay');
 const sessionSummaryBody = document.getElementById('sessionSummaryBody');
+const sessionSummaryShareBtn = document.getElementById('sessionSummaryShareBtn');
 const sessionSummaryCloseBtn = document.getElementById('sessionSummaryCloseBtn');
+const recordBadge = document.getElementById('recordBadge');
 const historyBtn = document.getElementById('historyBtn');
 const historyOverlay = document.getElementById('historyOverlay');
 const streakBadge = document.getElementById('streakBadge');
@@ -2127,6 +2138,34 @@ function aggregateHistory(){
   return [...map.values()].sort((a, b) => b.ts - a.ts);
 }
 
+// --- record personali ---
+// Basati sui totali aggregati per giorno (non sulle voci grezze), così una
+// sessione spezzata da una ricalibrazione non abbassa ingiustamente il record.
+function getPersonalRecord(exerciseKey){
+  const ex = EXERCISES[exerciseKey];
+  if(!ex) return null;
+  const rows = aggregateHistory().filter(r => r.key === exerciseKey);
+  if(rows.length === 0) return null;
+  if(ex.mode === 'reps'){
+    const best = Math.max(...rows.map(r => r.valid));
+    return best > 0 ? { value: best, mode: 'reps' } : null;
+  }
+  const best = Math.max(...rows.map(r => r.seconds));
+  return best > 0 ? { value: best, mode: 'timer' } : null;
+}
+
+function updateRecordBadge(){
+  const rec = getPersonalRecord(currentExercise);
+  if(!rec){
+    recordBadge.style.display = 'none';
+    return;
+  }
+  recordBadge.style.display = 'block';
+  recordBadge.textContent = rec.mode === 'reps'
+    ? ('🏆 Record personale: ' + rec.value + ' ripetizioni in un giorno')
+    : ('🏆 Record personale: ' + formatRestTime(rec.value) + ' in tenuta corretta');
+}
+
 // --- obiettivi e serie di giorni consecutivi ---
 const GOAL_STORAGE_KEY = 'formacheck_goal_v1';
 
@@ -2439,14 +2478,17 @@ function finishCircuit(){
   circuitProgressNote.style.display = 'none';
   circuitCancelBtn.style.display = 'none';
   circuitSummaryList.innerHTML = '';
+  let summaryText = '💪 FormaCheck — Circuito completato\n';
   circuitResults.forEach(r => {
     const row = document.createElement('div');
     row.className = 'circuit-summary-row';
     const invalidNote = r.invalid > 0 ? ' <span style="color:var(--ink-dim);">(' + r.invalid + ' scartate)</span>' : '';
     row.innerHTML = '<span>' + r.label + '</span><span>' + r.achieved + ' / ' + r.target + ' ' + r.unit + invalidNote + '</span>';
     circuitSummaryList.appendChild(row);
+    summaryText += '• ' + r.label + ': ' + r.achieved + '/' + r.target + ' ' + r.unit + (r.invalid > 0 ? ' (' + r.invalid + ' scartate)' : '') + '\n';
   });
   circuitSummaryOverlay.style.display = 'flex';
+  circuitSummaryShareBtn.onclick = () => shareText(summaryText);
   if(voiceEnabled) speak('Circuito completato, ottimo lavoro.');
 }
 
@@ -2562,6 +2604,7 @@ function selectExercise(key){
   updateMuscleDisplay();
   updateHowto();
   updateThresholdCalibStatus();
+  updateRecordBadge();
   const ex = EXERCISES[key];
   repCounter.style.display = ex.mode === 'reps' ? 'flex' : 'none';
   timerCounter.style.display = ex.mode === 'timer' ? 'block' : 'none';
@@ -2629,11 +2672,13 @@ updateViewBadge();
 updateMuscleDisplay();
 updateHowto();
 updateThresholdCalibStatus();
+updateRecordBadge();
 updateGoalUI();
 buildCircuitList();
 
 function resetMetrics(){
   logSessionIfActive();
+  updateRecordBadge(); // riflette subito un eventuale nuovo record appena registrato
   repCount = 0; repNum.textContent = '0';
   invalidRepCount = 0;
   sessionErrorTally = {};
@@ -2667,19 +2712,26 @@ function showSessionSummary(onClose){
   };
 
   addRow('Esercizio', ex.label);
+  let summaryText = '💪 FormaCheck — ' + ex.label + '\n';
   if(ex.mode === 'reps'){
     const total = repCount + invalidRepCount;
     const accuracy = total > 0 ? Math.round((repCount / total) * 100) : null;
     addRow('Ripetizioni valide', repCount);
     addRow('Ripetizioni scartate', invalidRepCount);
     if(accuracy != null) addRow('Precisione', accuracy + '%');
+    summaryText += repCount + ' ripetizioni valide';
+    if(invalidRepCount > 0) summaryText += ', ' + invalidRepCount + ' scartate';
+    if(accuracy != null) summaryText += ' (' + accuracy + '% di precisione)';
   } else {
-    addRow('Tempo in tenuta corretta', formatRestTime(Math.round(timerSeconds)));
+    const timeStr = formatRestTime(Math.round(timerSeconds));
+    addRow('Tempo in tenuta corretta', timeStr);
+    summaryText += timeStr + ' in tenuta corretta';
   }
   const topError = topErrorReason();
   if(topError) addRow('Errore più frequente', topError);
 
   sessionSummaryOverlay.style.display = 'flex';
+  sessionSummaryShareBtn.onclick = () => shareText(summaryText);
   sessionSummaryCloseBtn.onclick = () => {
     sessionSummaryOverlay.style.display = 'none';
     onClose();
@@ -2777,6 +2829,25 @@ function exportHistory(){
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// Condivide un testo con la condivisione nativa del telefono (WhatsApp,
+// Messaggi, ecc.); se non disponibile lo copia negli appunti come riserva.
+async function shareText(text){
+  if(navigator.share){
+    try{
+      await navigator.share({ title: 'FormaCheck', text });
+    } catch(e){
+      // l'utente ha annullato la condivisione, oppure non è riuscita: nessun avviso, è normale
+    }
+    return;
+  }
+  try{
+    await navigator.clipboard.writeText(text);
+    pushFeedback('Riepilogo copiato negli appunti.', true);
+  } catch(e){
+    pushFeedback('Condivisione non disponibile su questo browser.', false);
+  }
 }
 
 historyBtn.addEventListener('click', () => {
