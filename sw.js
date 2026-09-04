@@ -1,9 +1,12 @@
 // Service worker minimale per FormaCheck: mette in cache solo la "shell"
-// dell'app (questa pagina + manifest + icone), così l'interfaccia si apre
-// subito anche con rete lenta o assente. Il modello di rilevamento posa e le
-// librerie esterne (MediaPipe) restano SEMPRE scaricati dalla rete, non
-// vengono mai messi in cache qui: sono grossi e si aggiornano per conto loro.
-const CACHE_NAME = 'formacheck-shell-v1';
+// dell'app (questa pagina + manifest + icone). Strategia "prima la rete":
+// ogni apertura prova a scaricare la versione più recente, e usa la cache
+// solo come riserva se la rete non risponde — così un aggiornamento
+// pubblicato si vede già alla prima apertura successiva, non dopo due.
+// Il modello di rilevamento posa e le librerie esterne (MediaPipe) restano
+// SEMPRE scaricati dalla rete, non vengono mai messi in cache qui: sono
+// grossi e si aggiornano per conto loro.
+const CACHE_NAME = 'formacheck-shell-v2';
 const APP_SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -31,18 +34,18 @@ self.addEventListener('fetch', (event) => {
   try { url = new URL(req.url); } catch (e) { return; }
   if (url.origin !== self.location.origin) return; // solo la shell stesso-origine, mai i CDN esterni
 
+  // Prima la rete, così un aggiornamento pubblicato è visibile alla primissima
+  // apertura successiva (non a quella dopo). La cache serve solo come riserva
+  // se la rete non risponde (offline, connessione assente).
   event.respondWith(
-    caches.match(req).then((cached) => {
-      const network = fetch(req)
-        .then((res) => {
-          if (res && res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-          }
-          return res;
-        })
-        .catch(() => cached); // offline: usa la cache se la rete fallisce
-      return cached || network;
-    })
+    fetch(req)
+      .then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(req))
   );
 });
