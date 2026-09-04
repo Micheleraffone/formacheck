@@ -588,6 +588,15 @@
     </div>
     <div class="calib-overlay" id="historyOverlay" style="display:none;">
       <div class="calib-title">Cronologia allenamenti</div>
+      <div id="goalPanel" style="width:100%; max-width:340px; display:flex; flex-direction:column; gap:8px; align-items:center;">
+        <div id="streakBadge" style="font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:15px;">🔥 0 giorni di fila</div>
+        <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-dim);">
+          <span>Obiettivo: allenamenti a settimana</span>
+          <input type="number" id="goalWeeklyInput" min="1" max="14" value="3" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'IBM Plex Mono', monospace;">
+        </div>
+        <div class="calib-progress" style="width:220px;"><div class="calib-progress-bar" id="goalProgressBar"></div></div>
+        <div id="goalProgressLabel" style="font-size:11.5px; color:var(--ink-dim);"></div>
+      </div>
       <div id="historyChart" style="width:100%; max-width:340px;"></div>
       <div id="historyList" style="width:100%; max-width:340px; max-height:36vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
       <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
@@ -707,6 +716,12 @@
       <div class="rep-label">tempo in tenuta corretta</div>
     </div>
 
+    <div id="repGoalRow" style="display:none; align-items:center; justify-content:center; gap:8px; font-size:11.5px; color:var(--ink-dim); padding-bottom:4px;">
+      <span>Traguardo</span>
+      <input type="number" id="repGoalInput" min="1" value="10" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'IBM Plex Mono', monospace;">
+      <span id="repGoalUnit">ripetizioni</span>
+    </div>
+
     <div>
       <div class="metric-label" style="margin-bottom:8px;">Metriche</div>
       <div id="metricsContainer"></div>
@@ -795,11 +810,18 @@ const sessionSummaryBody = document.getElementById('sessionSummaryBody');
 const sessionSummaryCloseBtn = document.getElementById('sessionSummaryCloseBtn');
 const historyBtn = document.getElementById('historyBtn');
 const historyOverlay = document.getElementById('historyOverlay');
+const streakBadge = document.getElementById('streakBadge');
+const goalWeeklyInput = document.getElementById('goalWeeklyInput');
+const goalProgressBar = document.getElementById('goalProgressBar');
+const goalProgressLabel = document.getElementById('goalProgressLabel');
 const historyChart = document.getElementById('historyChart');
 const historyList = document.getElementById('historyList');
 const historyExportBtn = document.getElementById('historyExportBtn');
 const historyClearBtn = document.getElementById('historyClearBtn');
 const historyCloseBtn = document.getElementById('historyCloseBtn');
+const repGoalRow = document.getElementById('repGoalRow');
+const repGoalInput = document.getElementById('repGoalInput');
+const repGoalUnit = document.getElementById('repGoalUnit');
 
 let appMode = 'single'; // single | circuit
 let restDuration = 60;
@@ -825,6 +847,8 @@ const FRAMING_GRACE_MS = 2000; // oltre questo tempo senza inquadratura valida, 
 let repCount = 0;
 let invalidRepCount = 0; // ripetizioni scartate nella sessione corrente (forma scorretta, troppo veloci, ecc.)
 let sessionErrorTally = {}; // motivo di scarto -> quante volte è successo nella sessione corrente
+let repGoal = 10; // traguardo ripetizioni in modalità singolo esercizio (solo esercizi a ripetizioni)
+let timerGoalSeconds = 30; // idem per gli esercizi a timer
 let timerSeconds = 0;
 let lastFrameTime = performance.now();
 let fpsSmooth = 0;
@@ -845,6 +869,10 @@ function incrementRep(){
   void repNum.offsetWidth; // forza il reflow: riavvia l'animazione anche su incrementi consecutivi
   repNum.classList.add('pulse');
   if(voiceEnabled) speak(String(repCount));
+  if(!circuitActive && EXERCISES[currentExercise].mode === 'reps' && repCount === repGoal && !exState.goalCelebrated){
+    exState.goalCelebrated = true;
+    pushFeedback('🎯 Traguardo raggiunto: ' + repGoal + ' ripetizioni!', true);
+  }
   if(circuitActive && !isResting && repCount >= circuitList[circuitIndex].target){
     triggerCircuitAdvance();
   }
@@ -2099,6 +2127,69 @@ function aggregateHistory(){
   return [...map.values()].sort((a, b) => b.ts - a.ts);
 }
 
+// --- obiettivi e serie di giorni consecutivi ---
+const GOAL_STORAGE_KEY = 'formacheck_goal_v1';
+
+function loadGoal(){
+  try{
+    const raw = localStorage.getItem(GOAL_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : { weeklyTarget: 3 };
+  } catch(e){ return { weeklyTarget: 3 }; }
+}
+function saveGoal(goal){
+  try{ localStorage.setItem(GOAL_STORAGE_KEY, JSON.stringify(goal)); } catch(e){ /* storage non disponibile */ }
+}
+
+// Giorni consecutivi (fino a oggi) con almeno un allenamento registrato. Se
+// oggi non ci si è ancora allenati la serie non si considera "rotta": si
+// interrompe solo se salta un giorno intero.
+function computeStreak(){
+  const days = new Set(loadHistory().map(e => new Date(e.ts).toDateString()));
+  let streak = 0;
+  const cursor = new Date();
+  if(!days.has(cursor.toDateString())) cursor.setDate(cursor.getDate() - 1);
+  while(days.has(cursor.toDateString())){
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+// Numero di giorni diversi, dall'inizio della settimana corrente (lunedì), in
+// cui è stato registrato almeno un allenamento.
+function computeWeekCount(){
+  const now = new Date();
+  const dayIdx = (now.getDay() + 6) % 7; // lunedì = 0
+  const startOfWeek = new Date(now);
+  startOfWeek.setDate(now.getDate() - dayIdx);
+  startOfWeek.setHours(0, 0, 0, 0);
+  const days = new Set();
+  loadHistory().forEach(e => {
+    if(e.ts >= startOfWeek.getTime()) days.add(new Date(e.ts).toDateString());
+  });
+  return days.size;
+}
+
+function renderGoalPanel(){
+  const goal = loadGoal();
+  goalWeeklyInput.value = goal.weeklyTarget;
+  const streak = computeStreak();
+  streakBadge.textContent = streak > 0
+    ? ('🔥 ' + streak + (streak === 1 ? ' giorno di fila' : ' giorni di fila'))
+    : 'Nessuna serie attiva — inizia oggi!';
+  const weekCount = computeWeekCount();
+  const pct = Math.min(100, Math.round((weekCount / goal.weeklyTarget) * 100));
+  goalProgressBar.style.width = pct + '%';
+  goalProgressLabel.textContent = weekCount + ' / ' + goal.weeklyTarget + ' allenamenti questa settimana';
+}
+
+goalWeeklyInput.addEventListener('change', () => {
+  const val = Math.max(1, Math.min(14, parseInt(goalWeeklyInput.value, 10) || 3));
+  goalWeeklyInput.value = val;
+  saveGoal({ weeklyTarget: val });
+  renderGoalPanel();
+});
+
 function updateThresholdCalibStatus(){
   const ex = EXERCISES[currentExercise];
   if(!ex.calib){
@@ -2289,6 +2380,7 @@ modeSelect.querySelectorAll('.ex-btn').forEach(btn => {
     singleModeSection.style.display = appMode === 'single' ? 'block' : 'none';
     circuitBuilder.style.display = appMode === 'circuit' ? 'block' : 'none';
     startBtn.textContent = appMode === 'circuit' ? 'Avvia circuito' : 'Avvia fotocamera';
+    updateGoalUI();
   });
 });
 
@@ -2473,8 +2565,33 @@ function selectExercise(key){
   const ex = EXERCISES[key];
   repCounter.style.display = ex.mode === 'reps' ? 'flex' : 'none';
   timerCounter.style.display = ex.mode === 'timer' ? 'block' : 'none';
+  updateGoalUI();
   if(appState === 'active') enterCalibratingState();
 }
+
+// Mostra/aggiorna il controllo del traguardo (ripetizioni o secondi) per la
+// modalità singolo esercizio; in modalità circuito il traguardo è già gestito
+// per esercizio dal circuito stesso, quindi qui resta nascosto.
+function updateGoalUI(){
+  if(appMode !== 'single'){ repGoalRow.style.display = 'none'; return; }
+  const ex = EXERCISES[currentExercise];
+  repGoalRow.style.display = 'flex';
+  if(ex.mode === 'reps'){
+    repGoalInput.value = repGoal;
+    repGoalUnit.textContent = 'ripetizioni';
+  } else {
+    repGoalInput.value = timerGoalSeconds;
+    repGoalUnit.textContent = 'secondi';
+  }
+}
+
+repGoalInput.addEventListener('change', () => {
+  const val = Math.max(1, parseInt(repGoalInput.value, 10) || 1);
+  repGoalInput.value = val;
+  const ex = EXERCISES[currentExercise];
+  if(ex.mode === 'reps') repGoal = val;
+  else timerGoalSeconds = val;
+});
 
 function stopCameraStream(){
   if(video.srcObject){
@@ -2512,6 +2629,7 @@ updateViewBadge();
 updateMuscleDisplay();
 updateHowto();
 updateThresholdCalibStatus();
+updateGoalUI();
 buildCircuitList();
 
 function resetMetrics(){
@@ -2612,6 +2730,7 @@ function renderHistoryChart(){
 }
 
 function renderHistory(){
+  renderGoalPanel();
   renderHistoryChart();
   const rows = aggregateHistory();
   historyList.innerHTML = '';
@@ -2948,6 +3067,10 @@ function renderLoop(){
         const mm = Math.floor(timerSeconds/60);
         const ss = Math.floor(timerSeconds%60).toString().padStart(2,'0');
         timerNum.textContent = mm + ':' + ss;
+        if(!circuitActive && timerSeconds >= timerGoalSeconds && !exState.goalCelebrated){
+          exState.goalCelebrated = true;
+          pushFeedback('🎯 Traguardo raggiunto: ' + timerGoalSeconds + ' secondi in tenuta corretta!', true);
+        }
         if(circuitActive && !isResting && timerSeconds >= circuitList[circuitIndex].target){
           triggerCircuitAdvance();
         }
