@@ -1,0 +1,2991 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FormaCheck — correttore posturale</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0f0d;
+    --panel:#151a17;
+    --panel-2:#1b2119;
+    --panel-3:#222a22;
+    --line:#2a322c;
+    --line-soft:#212821;
+    --ink:#f1f5f0;
+    --ink-dim:#9aa69e;
+    --ink-faint:#6c766f;
+    --accent:#c9ff3d;
+    --accent-dim:#8fb82a;
+    --accent-glow:rgba(201,255,61,0.16);
+    --ok:#3ddc84;
+    --bad:#ff5c5c;
+    --warn:#ffb84d;
+    --radius-sm:8px;
+    --radius-md:12px;
+    --radius-lg:18px;
+    --shadow-sm:0 2px 10px rgba(0,0,0,0.3);
+    --shadow-md:0 10px 28px rgba(0,0,0,0.38);
+    --shadow-lg:0 18px 50px rgba(0,0,0,0.48);
+    --ease:cubic-bezier(.4,0,.2,1);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:
+      radial-gradient(1100px 560px at 12% -8%, rgba(201,255,61,0.055), transparent 60%),
+      radial-gradient(900px 520px at 105% 5%, rgba(61,220,132,0.045), transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:'IBM Plex Mono', monospace;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3, .num{ font-family:'Space Grotesk', sans-serif; }
+
+  ::-webkit-scrollbar{ width:8px; height:8px; }
+  ::-webkit-scrollbar-track{ background:transparent; }
+  ::-webkit-scrollbar-thumb{ background:var(--line); border-radius:8px; }
+  ::-webkit-scrollbar-thumb:hover{ background:var(--accent-dim); }
+
+  header{
+    width:100%;
+    max-width:1180px;
+    padding:32px 20px 20px;
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    border-bottom:1px solid var(--line-soft);
+  }
+  .brand{
+    font-size:27px;
+    font-weight:700;
+    letter-spacing:-0.015em;
+  }
+  .brand span{ color:var(--accent); text-shadow:0 0 26px var(--accent-glow); }
+  .tagline{ color:var(--ink-dim); font-size:13px; max-width:360px; text-align:right; line-height:1.55; }
+
+  main{
+    width:100%;
+    max-width:1180px;
+    padding:28px 20px 64px;
+    display:grid;
+    grid-template-columns:1.5fr 1fr;
+    gap:22px;
+  }
+  @media (max-width:860px){
+    main{ grid-template-columns:1fr; }
+    .tagline{ text-align:left; }
+  }
+
+  .stage{
+    position:relative;
+    background:#000;
+    border-radius:var(--radius-lg);
+    overflow:hidden;
+    aspect-ratio:4/3;
+    border:1px solid var(--line);
+    box-shadow:var(--shadow-lg);
+  }
+  @media (max-width:860px){
+    /* sotto la media query base di .stage nel foglio di stile, cosi' vince sulla cascata */
+    .stage:not(.expanded){ aspect-ratio:auto; height:70vh; }
+  }
+  .stage.expanded{
+    position:fixed;
+    inset:0;
+    z-index:1000;
+    width:100vw;
+    height:100vh;
+    max-width:none;
+    aspect-ratio:auto;
+    border-radius:0;
+    border:none;
+  }
+  body.stage-locked{ overflow:hidden; }
+  .expand-btn{
+    position:absolute;
+    top:12px; right:12px;
+    width:36px; height:36px;
+    background:rgba(14,18,16,0.75);
+    backdrop-filter:blur(6px);
+    border:1px solid var(--line);
+    color:var(--ink-dim);
+    border-radius:var(--radius-sm);
+    font-size:16px;
+    line-height:1;
+    cursor:pointer;
+    z-index:15; /* sopra tutti gli overlay (calibrazione, riposo, ecc.): resta sempre cliccabile */
+    display:flex; align-items:center; justify-content:center;
+    transition:color .15s var(--ease), border-color .15s var(--ease), transform .15s var(--ease);
+  }
+  .expand-btn:hover{ color:var(--accent); border-color:var(--accent-dim); transform:scale(1.06); }
+  .expand-btn:active{ transform:scale(0.94); }
+  video, canvas{
+    position:absolute;
+    top:0; left:0;
+    width:100%; height:100%;
+    object-fit:cover;
+  }
+  video.mirrored, canvas.mirrored{ transform:scaleX(-1); }
+  .stage-badge{
+    position:absolute;
+    top:12px; left:12px;
+    background:rgba(14,18,16,0.75);
+    backdrop-filter:blur(6px);
+    border:1px solid var(--line);
+    padding:6px 10px;
+    font-size:11px;
+    letter-spacing:0.04em;
+    border-radius:var(--radius-sm);
+    z-index:5;
+    color:var(--ink-dim);
+  }
+  .stage-status{
+    position:absolute;
+    bottom:0; left:0; right:0;
+    padding:20px 18px 18px;
+    background:linear-gradient(0deg, rgba(0,0,0,0.88), transparent);
+    z-index:5;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .status-dot{
+    width:12px; height:12px;
+    border-radius:50%;
+    background:var(--ink-dim);
+    flex-shrink:0;
+    box-shadow:0 0 0 4px rgba(255,255,255,0.05);
+    transition:background .2s var(--ease), box-shadow .2s var(--ease);
+  }
+  .status-dot.ok{ background:var(--ok); box-shadow:0 0 0 4px rgba(61,220,132,0.18), 0 0 18px rgba(61,220,132,0.45);}
+  .status-dot.bad{ background:var(--bad); box-shadow:0 0 0 4px rgba(255,92,92,0.18), 0 0 18px rgba(255,92,92,0.4);}
+  .status-text{ font-size:14px; font-weight:500; }
+
+  .panel{
+    background:linear-gradient(175deg, var(--panel), var(--panel-2) 130%);
+    border:1px solid var(--line);
+    border-radius:var(--radius-lg);
+    padding:20px;
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+    box-shadow:var(--shadow-md);
+  }
+
+  .exercise-select{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+  }
+  .ex-btn{
+    background:var(--panel-3);
+    border:1px solid var(--line);
+    color:var(--ink-dim);
+    padding:11px 10px;
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:600;
+    font-size:12.5px;
+    border-radius:var(--radius-sm);
+    cursor:pointer;
+    transition:border-color .15s var(--ease), color .15s var(--ease), background-color .15s var(--ease), transform .1s var(--ease), box-shadow .15s var(--ease);
+    text-align:left;
+  }
+  .ex-btn:hover{ border-color:var(--accent-dim); color:var(--ink); }
+  .ex-btn:active{ transform:scale(0.98); }
+  .ex-btn.active{
+    color:var(--bg);
+    background:var(--accent);
+    border-color:var(--accent);
+    box-shadow:0 6px 16px var(--accent-glow);
+  }
+
+  .view-badge{
+    display:flex;
+    align-items:flex-start;
+    gap:12px;
+    background:var(--panel-3);
+    border:1px solid var(--line);
+    border-radius:var(--radius-md);
+    padding:14px 16px;
+  }
+  .view-badge-icon{
+    font-size:20px;
+    color:var(--accent);
+    flex-shrink:0;
+    line-height:1.2;
+  }
+  .view-badge-title{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:600;
+    font-size:13px;
+    margin-bottom:3px;
+  }
+  .view-badge-note{
+    color:var(--ink-dim);
+    font-size:12px;
+    line-height:1.5;
+  }
+
+  .howto-panel{ display:flex; flex-direction:column; }
+  .howto-toggle{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    width:100%;
+    background:var(--panel-3);
+    border:1px solid var(--line);
+    border-radius:var(--radius-md);
+    color:var(--ink);
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:600;
+    font-size:13px;
+    padding:12px 16px;
+    cursor:pointer;
+    transition:border-color .15s var(--ease), border-radius .2s var(--ease);
+  }
+  .howto-toggle:hover{ border-color:var(--accent-dim); }
+  .howto-toggle[aria-expanded="true"]{ border-radius:var(--radius-md) var(--radius-md) 0 0; }
+  .howto-chevron{ color:var(--ink-dim); transition:transform .2s var(--ease); font-size:12px; }
+  .howto-toggle[aria-expanded="true"] .howto-chevron{ transform:rotate(180deg); }
+  .howto-list{
+    list-style:none;
+    counter-reset:howto;
+    display:flex;
+    flex-direction:column;
+    gap:9px;
+    margin:0;
+    padding:14px 16px;
+    background:var(--panel-3);
+    border:1px solid var(--line);
+    border-top:none;
+    border-radius:0 0 var(--radius-md) var(--radius-md);
+    font-size:12.5px;
+    line-height:1.5;
+    color:var(--ink);
+    animation:howtoIn .18s var(--ease);
+  }
+  @keyframes howtoIn{
+    from{ opacity:0; transform:translateY(-4px); }
+    to{ opacity:1; transform:translateY(0); }
+  }
+  .howto-list li{
+    counter-increment:howto;
+    padding-left:26px;
+    position:relative;
+  }
+  .howto-list li::before{
+    content:counter(howto);
+    position:absolute;
+    left:0; top:0;
+    width:18px; height:18px;
+    border-radius:50%;
+    background:var(--accent);
+    color:var(--bg);
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:700;
+    font-size:10.5px;
+    display:flex; align-items:center; justify-content:center;
+  }
+
+  .muscle-panel{ display:flex; flex-direction:column; gap:12px; }
+  .muscle-figure-wrap{ display:flex; gap:18px; align-items:center; }
+  .muscle-figure{ width:92px; height:auto; flex-shrink:0; filter:drop-shadow(0 6px 14px rgba(0,0,0,0.4)); }
+  .muscle-region{ fill:var(--panel-3); stroke:var(--line); stroke-width:1.5; transition:fill .2s var(--ease), stroke .2s var(--ease); }
+  .muscle-region.active{ fill:var(--bad); stroke:var(--bad); }
+  .muscle-static{ fill:var(--panel-3); stroke:var(--line); stroke-width:1.5; }
+  .muscle-legend{ display:flex; flex-wrap:wrap; gap:6px; align-content:flex-start; }
+  .muscle-chip{
+    font-size:11px;
+    padding:5px 10px;
+    border-radius:20px;
+    background:var(--panel-3);
+    border:1px solid var(--line);
+    color:var(--ink-dim);
+    transition:border-color .15s var(--ease), color .15s var(--ease);
+  }
+
+  .controls{ display:flex; gap:8px; }
+  .btn{
+    flex:1;
+    padding:12px;
+    border-radius:var(--radius-sm);
+    border:1px solid var(--line);
+    background:var(--panel-3);
+    color:var(--ink);
+    font-family:'IBM Plex Mono', monospace;
+    font-size:13px;
+    cursor:pointer;
+    transition:border-color .15s var(--ease), background-color .15s var(--ease), transform .1s var(--ease), box-shadow .15s var(--ease), opacity .15s var(--ease);
+  }
+  .btn:hover:not(:disabled){ border-color:var(--accent-dim); }
+  .btn:active:not(:disabled){ transform:scale(0.98); }
+  .btn.primary{ background:var(--accent); color:var(--bg); border-color:var(--accent); font-weight:600; box-shadow:0 8px 20px var(--accent-glow); }
+  .btn.primary:hover:not(:disabled){ border-color:var(--accent); filter:brightness(1.05); }
+  .btn:disabled{ opacity:0.4; cursor:not-allowed; }
+
+  .metric-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    padding:11px 0;
+    border-bottom:1px solid var(--line-soft);
+  }
+  .metric-row:last-child{ border-bottom:none; }
+  .metric-label{ color:var(--ink-dim); font-size:12px; }
+  .metric-value{ font-family:'Space Grotesk', sans-serif; font-size:20px; font-weight:600; transition:color .2s var(--ease); }
+  .metric-value.ok{ color:var(--ok); }
+  .metric-value.bad{ color:var(--bad); }
+
+  .feedback-list{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    max-height:220px;
+    overflow-y:auto;
+  }
+  .fb-item{
+    padding:11px 13px;
+    border-radius:var(--radius-sm);
+    font-size:12.5px;
+    line-height:1.5;
+    border-left:3px solid var(--line);
+    background:var(--panel-3);
+    animation:fbIn .22s var(--ease);
+  }
+  @keyframes fbIn{
+    from{ opacity:0; transform:translateY(-6px); }
+    to{ opacity:1; transform:translateY(0); }
+  }
+  .fb-item.bad{ border-left-color:var(--bad); }
+  .fb-item.ok{ border-left-color:var(--ok); color:var(--ink-dim); }
+
+  .rep-counter{
+    display:flex;
+    align-items:baseline;
+    gap:10px;
+    justify-content:center;
+    padding:8px 0 4px;
+  }
+  .rep-num{ font-size:54px; font-weight:700; line-height:1; display:inline-block; transition:color .2s var(--ease); }
+  .rep-num.pulse{ animation:repPulse .38s var(--ease); }
+  @keyframes repPulse{
+    0%{ transform:scale(1.32); color:var(--accent); }
+    100%{ transform:scale(1); }
+  }
+  .rep-label{ color:var(--ink-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.06em; }
+
+  footer{
+    width:100%;
+    max-width:1180px;
+    padding:0 20px 44px;
+    color:var(--ink-faint);
+    font-size:11.5px;
+    line-height:1.6;
+  }
+  .loading-overlay{
+    position:absolute; inset:0;
+    background:rgba(14,18,16,0.92);
+    display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+    gap:10px; z-index:10;
+    font-size:13px; color:var(--ink-dim);
+    text-align:center;
+    padding:20px;
+  }
+
+  .cam-select{ display:flex; gap:8px; }
+  .cam-btn{
+    flex:1;
+    background:var(--panel-3);
+    border:1px solid var(--line);
+    color:var(--ink-dim);
+    padding:10px 8px;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12px;
+    border-radius:var(--radius-sm);
+    cursor:pointer;
+    transition:border-color .15s var(--ease), color .15s var(--ease), transform .1s var(--ease);
+  }
+  .cam-btn:hover:not(:disabled){ color:var(--ink); }
+  .cam-btn:active:not(:disabled){ transform:scale(0.98); }
+  .cam-btn.active{ color:var(--accent); border-color:var(--accent-dim); }
+  .cam-btn:disabled{ opacity:0.4; cursor:not-allowed; }
+
+  .calib-overlay{
+    position:absolute; inset:0;
+    background:rgba(11,15,13,0.78);
+    backdrop-filter:blur(3px);
+    display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+    gap:16px; z-index:8;
+    padding:24px;
+    text-align:center;
+    animation:overlayIn .2s var(--ease);
+  }
+  @keyframes overlayIn{
+    from{ opacity:0; }
+    to{ opacity:1; }
+  }
+  .calib-title{ font-family:'Space Grotesk', sans-serif; font-size:17px; font-weight:600; }
+  .calib-hint{ color:var(--ink-dim); font-size:12.5px; max-width:320px; line-height:1.55; }
+  .calib-checklist{
+    display:flex; flex-direction:column; gap:9px;
+    background:rgba(21,26,23,0.92);
+    border:1px solid var(--line);
+    border-radius:var(--radius-md);
+    padding:16px 20px;
+    min-width:220px;
+    box-shadow:var(--shadow-md);
+  }
+  .calib-item{
+    display:flex; align-items:center; gap:10px;
+    font-size:12.5px; color:var(--ink-dim);
+    transition:color .2s var(--ease);
+  }
+  .calib-item .dot{
+    width:9px; height:9px; border-radius:50%;
+    background:var(--ink-dim); flex-shrink:0;
+    transition:background .2s var(--ease), box-shadow .2s var(--ease);
+  }
+  .calib-item.pass{ color:var(--ink); }
+  .calib-item.pass .dot{ background:var(--ok); box-shadow:0 0 10px rgba(61,220,132,0.6); }
+  .calib-progress{
+    width:220px; height:5px; background:var(--panel-3);
+    border-radius:3px; overflow:hidden; border:1px solid var(--line);
+  }
+  .calib-progress-bar{
+    height:100%; width:0%; background:linear-gradient(90deg, var(--accent-dim), var(--accent));
+    transition:width .1s linear;
+  }
+  .calib-skip{
+    background:none; border:none; color:var(--ink-dim);
+    font-family:'IBM Plex Mono', monospace; font-size:11.5px;
+    text-decoration:underline; cursor:pointer; padding:4px;
+    transition:color .15s var(--ease);
+  }
+  .calib-skip:hover{ color:var(--ink); }
+  .calib-status-note{
+    font-size:11.5px; color:var(--ok);
+    background:var(--panel-3); border:1px solid var(--line);
+    border-radius:var(--radius-sm); padding:9px 11px; line-height:1.55;
+  }
+
+  .circuit-builder{ display:flex; flex-direction:column; gap:6px; }
+  .circuit-row{
+    display:flex; align-items:center; gap:8px;
+    padding:9px 0; border-bottom:1px solid var(--line-soft);
+    font-size:12.5px;
+  }
+  .circuit-row:last-child{ border-bottom:none; }
+  .circuit-row input[type="checkbox"]{ accent-color:var(--accent); width:16px; height:16px; flex-shrink:0; }
+  .circuit-row label{ flex:1; cursor:pointer; }
+  .circuit-row input[type="number"]{
+    width:56px; background:var(--panel-3); border:1px solid var(--line);
+    color:var(--ink); border-radius:var(--radius-sm); padding:5px;
+    font-family:'IBM Plex Mono', monospace; font-size:12px; text-align:center;
+  }
+  .circuit-row .unit{ color:var(--ink-dim); font-size:11px; width:38px; }
+
+  .rest-countdown{
+    font-family:'Space Grotesk', sans-serif;
+    font-size:68px; font-weight:700; color:var(--accent);
+    line-height:1;
+    text-shadow:0 0 40px var(--accent-glow);
+  }
+
+  .circuit-summary-row{
+    display:flex; justify-content:space-between; gap:10px;
+    padding:9px 0; border-bottom:1px solid var(--line-soft);
+    font-size:13px; text-align:left;
+  }
+  .circuit-summary-row:last-child{ border-bottom:none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">Forma<span>Check</span></div>
+  <div class="tagline">Prototipo: correzione posturale in tempo reale via fotocamera, per esercizi a corpo libero.</div>
+</header>
+
+<main>
+  <div class="stage" id="stage">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="overlay"></canvas>
+    <div class="stage-badge" id="fpsBadge">— fps</div>
+    <button class="expand-btn" id="expandBtn" title="Ingrandisci l'inquadratura">⤢</button>
+    <div class="loading-overlay" id="loadingOverlay" style="display:none;">
+      Caricamento modello di pose estimation…<br>può richiedere qualche secondo
+    </div>
+    <div class="calib-overlay" id="calibOverlay" style="display:none;">
+      <div class="calib-title">Calibrazione</div>
+      <div class="calib-hint" id="calibHint">Posizionati di lato all'obiettivo, a figura intera, così da vedere spalla, anca, ginocchio e caviglia.</div>
+      <div class="calib-checklist" id="calibChecklist"></div>
+      <div class="calib-progress"><div class="calib-progress-bar" id="calibBar"></div></div>
+      <button class="calib-skip" id="calibSkip">Salta calibrazione</button>
+    </div>
+    <div class="calib-overlay" id="thresholdCalibOverlay" style="display:none;">
+      <div class="calib-title" id="thresholdCalibStepLabel">Taratura soglie — passo 1 di 2</div>
+      <div class="calib-hint" id="thresholdCalibPrompt"></div>
+      <div class="calib-progress"><div class="calib-progress-bar" id="thresholdCalibBar"></div></div>
+      <button class="calib-skip" id="thresholdCalibCancel">Annulla</button>
+    </div>
+    <div class="calib-overlay" id="restOverlay" style="display:none;">
+      <div class="calib-title">Riposo</div>
+      <div class="calib-hint" id="restNextLabel"></div>
+      <div class="rest-countdown" id="restCountdown">60</div>
+      <button class="calib-skip" id="restSkipBtn">Salta riposo</button>
+    </div>
+    <div class="calib-overlay" id="circuitIntroOverlay" style="display:none;">
+      <div class="calib-title">Prossimo esercizio</div>
+      <div class="view-badge-icon" id="circuitIntroIcon" style="font-size:32px;">◐</div>
+      <div class="calib-hint" id="circuitIntroLabel" style="font-size:16px; color:var(--ink);"></div>
+      <div class="calib-hint" id="circuitIntroTarget"></div>
+    </div>
+    <div class="calib-overlay" id="circuitSummaryOverlay" style="display:none;">
+      <div class="calib-title">Circuito completato 🎉</div>
+      <div id="circuitSummaryList" style="width:100%; max-width:280px;"></div>
+      <button class="calib-skip" id="circuitSummaryCloseBtn">Chiudi</button>
+    </div>
+    <div class="calib-overlay" id="sessionSummaryOverlay" style="display:none;">
+      <div class="calib-title">Riepilogo</div>
+      <div id="sessionSummaryBody" style="width:100%; max-width:280px; display:flex; flex-direction:column; gap:10px;"></div>
+      <button class="calib-skip" id="sessionSummaryCloseBtn">Chiudi</button>
+    </div>
+    <div class="calib-overlay" id="historyOverlay" style="display:none;">
+      <div class="calib-title">Cronologia allenamenti</div>
+      <div id="historyList" style="width:100%; max-width:340px; max-height:44vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
+      <div style="display:flex; gap:10px;">
+        <button class="calib-skip" id="historyClearBtn">Cancella cronologia</button>
+        <button class="calib-skip" id="historyCloseBtn">Chiudi</button>
+      </div>
+    </div>
+    <div class="stage-status">
+      <div class="status-dot" id="statusDot"></div>
+      <div class="status-text" id="statusText">In attesa della fotocamera</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div>
+      <div class="metric-label" style="margin-bottom:8px;">Modalità</div>
+      <div class="exercise-select" id="modeSelect" style="grid-template-columns:1fr 1fr;">
+        <button class="ex-btn active" data-mode="single">Singolo esercizio</button>
+        <button class="ex-btn" data-mode="circuit">Circuito</button>
+      </div>
+    </div>
+
+    <div id="singleModeSection">
+    <div>
+      <div class="metric-label" style="margin-bottom:8px;">Esercizio</div>
+      <div class="exercise-select" id="exerciseSelect"></div>
+    </div>
+
+    <div class="view-badge" id="viewBadge">
+      <div class="view-badge-icon" id="viewIcon">◐</div>
+      <div>
+        <div class="view-badge-title" id="viewTitle">Vista laterale</div>
+        <div class="view-badge-note" id="viewNote">Posizionati di lato all'obiettivo.</div>
+      </div>
+    </div>
+
+    <div class="howto-panel">
+      <button class="howto-toggle" id="howtoToggle" aria-expanded="false">
+        <span>Come si esegue</span>
+        <span class="howto-chevron" id="howtoChevron">▾</span>
+      </button>
+      <ol class="howto-list" id="howtoList" hidden></ol>
+    </div>
+
+    <div class="muscle-panel">
+      <div class="metric-label">Muscoli coinvolti</div>
+      <div class="muscle-figure-wrap">
+        <svg class="muscle-figure" id="muscleFigure" viewBox="0 0 140 300" xmlns="http://www.w3.org/2000/svg">
+          <circle class="muscle-static" cx="70" cy="22" r="16"/>
+          <rect class="muscle-static" x="64" y="35" width="12" height="12"/>
+          <rect class="muscle-region" data-region="shoulders" x="38" y="46" width="64" height="14" rx="6"/>
+          <rect class="muscle-region" data-region="arms" x="18" y="50" width="16" height="68" rx="6"/>
+          <rect class="muscle-region" data-region="arms" x="106" y="50" width="16" height="68" rx="6"/>
+          <circle class="muscle-static" cx="26" cy="122" r="6"/>
+          <circle class="muscle-static" cx="114" cy="122" r="6"/>
+          <rect class="muscle-region" data-region="chest" x="46" y="58" width="48" height="30" rx="6"/>
+          <rect class="muscle-region" data-region="core" x="50" y="90" width="40" height="34" rx="6"/>
+          <rect class="muscle-region" data-region="hips" x="44" y="126" width="52" height="26" rx="8"/>
+          <rect class="muscle-region" data-region="thighs" x="46" y="154" width="20" height="58" rx="8"/>
+          <rect class="muscle-region" data-region="thighs" x="74" y="154" width="20" height="58" rx="8"/>
+          <rect class="muscle-region" data-region="calves" x="48" y="214" width="16" height="54" rx="6"/>
+          <rect class="muscle-region" data-region="calves" x="76" y="214" width="16" height="54" rx="6"/>
+          <rect class="muscle-static" x="47" y="270" width="18" height="9" rx="3"/>
+          <rect class="muscle-static" x="75" y="270" width="18" height="9" rx="3"/>
+        </svg>
+        <div class="muscle-legend" id="muscleLegend"></div>
+      </div>
+    </div>
+    </div>
+
+    <div class="circuit-builder" id="circuitBuilder" style="display:none;">
+      <div class="metric-label" style="margin-bottom:8px;">Scegli gli esercizi del circuito, in ordine</div>
+      <div id="circuitList"></div>
+      <div class="metric-label" style="margin:14px 0 8px;">Riposo tra un esercizio e l'altro</div>
+      <div class="cam-select" id="restPresetSelect">
+        <button class="cam-btn restpreset-btn" data-rest="30">30s</button>
+        <button class="cam-btn restpreset-btn active" data-rest="60">60s</button>
+        <button class="cam-btn restpreset-btn" data-rest="90">90s</button>
+      </div>
+    </div>
+
+    <div class="calib-status-note" id="circuitProgressNote" style="display:none;"></div>
+
+    <div>
+      <div class="metric-label" style="margin-bottom:8px;">Fotocamera</div>
+      <div class="cam-select">
+        <button class="cam-btn" data-facing="user">Anteriore</button>
+        <button class="cam-btn active" data-facing="environment">Posteriore</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="metric-label" style="margin-bottom:8px;">Feedback vocale</div>
+      <button class="btn" id="voiceBtn" style="width:100%;">🔈 Vocale disattivato — tocca per attivare</button>
+    </div>
+
+    <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
+
+    <div class="controls">
+      <button class="btn primary" id="startBtn">Avvia fotocamera</button>
+      <button class="btn" id="resetBtn" disabled>Azzera</button>
+    </div>
+    <button class="btn" id="recalibBtn" style="display:none;">Ricalibra posizione</button>
+    <button class="btn" id="thresholdCalibBtn" style="display:none;">Taratura soglie personalizzata</button>
+    <div class="calib-status-note" id="thresholdCalibStatus" style="display:none;"></div>
+    <button class="btn" id="restBtn" style="display:none;">Inizia riposo</button>
+    <button class="btn" id="circuitCancelBtn" style="display:none;">Termina circuito</button>
+
+    <div class="rep-counter" id="repCounter" style="display:none;">
+      <div class="rep-num" id="repNum">0</div>
+      <div class="rep-label">ripetizioni</div>
+    </div>
+
+    <div id="timerCounter" style="display:none; text-align:center; padding:6px 0 2px;">
+      <div class="rep-num" id="timerNum">0:00</div>
+      <div class="rep-label">tempo in tenuta corretta</div>
+    </div>
+
+    <div>
+      <div class="metric-label" style="margin-bottom:8px;">Metriche</div>
+      <div id="metricsContainer"></div>
+    </div>
+
+    <div>
+      <div class="metric-label" style="margin-bottom:8px;">Feedback</div>
+      <div class="feedback-list" id="feedbackList">
+        <div class="fb-item">Avvia la fotocamera e posizionati di lato all'inquadratura, a figura intera.</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  Prototipo didattico — non sostituisce la valutazione di un personal trainer o fisioterapista qualificato.
+  Il rilevamento funziona meglio con buona illuminazione, inquadratura laterale e corpo intero visibile.
+</footer>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver, DrawingUtils } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('overlay');
+const ctx = canvas.getContext('2d');
+const startBtn = document.getElementById('startBtn');
+const resetBtn = document.getElementById('resetBtn');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const loadingOverlay = document.getElementById('loadingOverlay');
+const fpsBadge = document.getElementById('fpsBadge');
+const expandBtn = document.getElementById('expandBtn');
+const stageEl = document.getElementById('stage');
+const feedbackList = document.getElementById('feedbackList');
+const metricsContainer = document.getElementById('metricsContainer');
+const exerciseSelect = document.getElementById('exerciseSelect');
+const viewIcon = document.getElementById('viewIcon');
+const viewTitle = document.getElementById('viewTitle');
+const viewNote = document.getElementById('viewNote');
+const muscleLegend = document.getElementById('muscleLegend');
+const muscleRegionEls = document.querySelectorAll('#muscleFigure [data-region]');
+const howtoToggle = document.getElementById('howtoToggle');
+const howtoChevron = document.getElementById('howtoChevron');
+const howtoList = document.getElementById('howtoList');
+const calibHint = document.getElementById('calibHint');
+const repCounter = document.getElementById('repCounter');
+const repNum = document.getElementById('repNum');
+const timerCounter = document.getElementById('timerCounter');
+const timerNum = document.getElementById('timerNum');
+const calibOverlay = document.getElementById('calibOverlay');
+const calibChecklist = document.getElementById('calibChecklist');
+const calibBar = document.getElementById('calibBar');
+const calibSkip = document.getElementById('calibSkip');
+const recalibBtn = document.getElementById('recalibBtn');
+const thresholdCalibBtn = document.getElementById('thresholdCalibBtn');
+const thresholdCalibStatus = document.getElementById('thresholdCalibStatus');
+const thresholdCalibOverlay = document.getElementById('thresholdCalibOverlay');
+const thresholdCalibStepLabel = document.getElementById('thresholdCalibStepLabel');
+const thresholdCalibPrompt = document.getElementById('thresholdCalibPrompt');
+const thresholdCalibBar = document.getElementById('thresholdCalibBar');
+const thresholdCalibCancel = document.getElementById('thresholdCalibCancel');
+const camButtons = document.querySelectorAll('.cam-btn[data-facing]');
+const voiceBtn = document.getElementById('voiceBtn');
+
+const modeSelect = document.getElementById('modeSelect');
+const singleModeSection = document.getElementById('singleModeSection');
+const circuitBuilder = document.getElementById('circuitBuilder');
+const circuitListEl = document.getElementById('circuitList');
+const restPresetButtons = document.querySelectorAll('.restpreset-btn');
+const circuitProgressNote = document.getElementById('circuitProgressNote');
+const restBtn = document.getElementById('restBtn');
+const circuitCancelBtn = document.getElementById('circuitCancelBtn');
+const restOverlay = document.getElementById('restOverlay');
+const restNextLabel = document.getElementById('restNextLabel');
+const restCountdown = document.getElementById('restCountdown');
+const restSkipBtn = document.getElementById('restSkipBtn');
+const circuitIntroOverlay = document.getElementById('circuitIntroOverlay');
+const circuitIntroIcon = document.getElementById('circuitIntroIcon');
+const circuitIntroLabel = document.getElementById('circuitIntroLabel');
+const circuitIntroTarget = document.getElementById('circuitIntroTarget');
+const circuitSummaryOverlay = document.getElementById('circuitSummaryOverlay');
+const circuitSummaryList = document.getElementById('circuitSummaryList');
+const circuitSummaryCloseBtn = document.getElementById('circuitSummaryCloseBtn');
+const sessionSummaryOverlay = document.getElementById('sessionSummaryOverlay');
+const sessionSummaryBody = document.getElementById('sessionSummaryBody');
+const sessionSummaryCloseBtn = document.getElementById('sessionSummaryCloseBtn');
+const historyBtn = document.getElementById('historyBtn');
+const historyOverlay = document.getElementById('historyOverlay');
+const historyList = document.getElementById('historyList');
+const historyClearBtn = document.getElementById('historyClearBtn');
+const historyCloseBtn = document.getElementById('historyCloseBtn');
+
+let appMode = 'single'; // single | circuit
+let restDuration = 60;
+let restRemaining = 0;
+let restIntervalId = null;
+let restOnComplete = null;
+let isResting = false;
+let circuitList = []; // [{key, target}]
+let circuitIndex = 0;
+let circuitActive = false;
+let circuitResults = [];
+
+let currentExercise = 'squat';
+let poseLandmarker = null;
+let running = false;
+let lastVideoTime = -1;
+let facingMode = 'environment';
+let appState = 'idle'; // idle | calibrating | active
+let calibStableSince = null;
+const CALIB_STABLE_MS = 1200;
+let framingBadSince = null; // durante il tracking attivo: da quando l'inquadratura non è più valida
+const FRAMING_GRACE_MS = 2000; // oltre questo tempo senza inquadratura valida, si torna alla calibrazione
+let repCount = 0;
+let invalidRepCount = 0; // ripetizioni scartate nella sessione corrente (forma scorretta, troppo veloci, ecc.)
+let sessionErrorTally = {}; // motivo di scarto -> quante volte è successo nella sessione corrente
+let timerSeconds = 0;
+let lastFrameTime = performance.now();
+let fpsSmooth = 0;
+let metricValueEls = [];
+let exState = {}; // stato interno per-esercizio (fase reps, ecc.)
+let lastTimerTick = performance.now();
+
+const VIEW_META = {
+  laterale: { icon:'◐', title:'Vista laterale' },
+  frontale: { icon:'◯', title:'Vista frontale' },
+  posteriore: { icon:'◑', title:'Vista posteriore' }
+};
+
+function incrementRep(){
+  repCount++;
+  repNum.textContent = repCount;
+  repNum.classList.remove('pulse');
+  void repNum.offsetWidth; // forza il reflow: riavvia l'animazione anche su incrementi consecutivi
+  repNum.classList.add('pulse');
+  if(voiceEnabled) speak(String(repCount));
+  if(circuitActive && !isResting && repCount >= circuitList[circuitIndex].target){
+    triggerCircuitAdvance();
+  }
+}
+
+// Chiude una ripetizione: la conta solo se non ci sono stati errori di forma
+// durante tutta la fase attiva. Se la forma era scorretta, avvisa e non la
+// conta. invalidMsg può essere una frase sola (retrocompatibile) oppure un
+// array di frasi: vengono mostrate insieme nella lista feedback ma pronunciate
+// una dopo l'altra in coda, senza sovrapporsi né interrompersi a vicenda.
+function completeRep(hadIssue, invalidMsg, validMsg){
+  if(hadIssue){
+    invalidRepCount++;
+    const parts = Array.isArray(invalidMsg) ? invalidMsg : [invalidMsg || 'Ripetizione non conteggiata: correggi la forma e riprova.'];
+    const reasonKey = parts[parts.length - 1] || parts[0];
+    if(reasonKey) sessionErrorTally[reasonKey] = (sessionErrorTally[reasonKey] || 0) + 1;
+    pushFeedbackSequence(parts, false);
+  } else {
+    incrementRep();
+    if(validMsg) pushFeedback(validMsg, true);
+  }
+}
+
+// Il motivo di scarto più frequente nella sessione corrente (per il riepilogo).
+function topErrorReason(){
+  let best = null, bestCount = 0;
+  Object.keys(sessionErrorTally).forEach(k => {
+    if(sessionErrorTally[k] > bestCount){ best = k; bestCount = sessionErrorTally[k]; }
+  });
+  return best;
+}
+
+// Costruisce la sequenza vocale "consequenziale" per una ripetizione scartata
+// per forma scorretta: prima l'annuncio generico, poi la non-conteggiata, poi
+// come correggere (ricavato dalla frase di diagnosi, tipicamente nel formato
+// "problema: correzione").
+function rejectRepSequence(issueMsg){
+  return ['Movimento non corretto.', 'Ripetizione non conteggiata.', extractCorrection(issueMsg)];
+}
+function extractCorrection(msg){
+  if(!msg) return null;
+  const idx = msg.indexOf(': ');
+  return idx >= 0 ? msg.slice(idx + 2) : msg;
+}
+
+// Un singolo frame "sbagliato" capita spesso solo per rumore del rilevamento
+// posa (uno scheletro mal stimato per un istante), non per un vero errore di
+// forma: un errore deve persistere per un po' prima di invalidare la
+// ripetizione, altrimenti quasi nessuna ripetizione verrebbe mai conteggiata.
+const ISSUE_MIN_MS = 220;
+function trackFormIssue(hasIssue, msg){
+  const now = performance.now();
+  if(hasIssue){
+    if(exState.issueSince == null) exState.issueSince = now;
+    if(msg) exState.lastIssueMsg = msg;
+    if(now - exState.issueSince >= ISSUE_MIN_MS) exState.repHadIssue = true;
+  } else {
+    exState.issueSince = null;
+  }
+}
+
+// Scuotere il telefono (o un urto/tremolio dell'inquadratura) può far scattare
+// gli angoli oltre le soglie per un solo istante, simulando una ripetizione
+// completa in pochi millisecondi: nessun movimento umano reale è così veloce,
+// quindi una "ripetizione" più corta di questo tempo minimo è quasi certamente
+// rumore, non un vero movimento, e va scartata.
+const MIN_REP_MS = 300;
+function repTooFast(phaseStartTime){
+  return phaseStartTime == null || (performance.now() - phaseStartTime) < MIN_REP_MS;
+}
+
+// --- feedback vocale ---
+let voiceEnabled = false;
+let italianVoice = null;
+const speechSupported = 'speechSynthesis' in window;
+
+function pickItalianVoice(){
+  if(!speechSupported) return null;
+  const voices = window.speechSynthesis.getVoices();
+  return voices.find(v => v.lang && v.lang.toLowerCase().startsWith('it')) || null;
+}
+
+if(speechSupported){
+  italianVoice = pickItalianVoice();
+  window.speechSynthesis.onvoiceschanged = () => { italianVoice = pickItalianVoice(); };
+} else {
+  voiceBtn.disabled = true;
+  voiceBtn.textContent = 'Sintesi vocale non supportata su questo browser';
+}
+
+// Coda vocale vera e propria: ogni chiamata a speak() accoda una frase, che
+// parte solo quando quella precedente è realmente finita (onend/onerror).
+// Nessuna frase interrompe o si sovrappone a un'altra — restano sempre in
+// sequenza, una dopo l'altra.
+let speechQueue = [];
+let speechBusy = false;
+// Riferimenti tenuti vivi a livello di modulo: su Safari/iOS un'utterance
+// creata come semplice variabile locale può essere raccolta dal garbage
+// collector prima che la sintesi finisca di pronunciarla, interrompendo
+// l'audio in silenzio.
+let livingUtterances = [];
+
+// Evita di accodare la stessa identica frase più volte a distanza ravvicinata:
+// alcuni avvisi vengono ripetuti a caso per più fotogrammi di seguito finché
+// un problema persiste, e con una coda che non si interrompe più da sola
+// finirebbero per sentirsi tutti in fila, uno via l'altro.
+const speechDedupe = new Map(); // testo -> timestamp dell'ultima messa in coda
+const SPEECH_DEDUPE_MS = 4000;
+
+function speak(text){
+  if(!voiceEnabled || !speechSupported || !text) return;
+  const now = performance.now();
+  const last = speechDedupe.get(text);
+  if(last != null && now - last < SPEECH_DEDUPE_MS) return;
+  speechDedupe.set(text, now);
+  speechQueue.push(text);
+  pumpSpeechQueue();
+}
+
+function pumpSpeechQueue(){
+  if(speechBusy || speechQueue.length === 0) return;
+  const text = speechQueue.shift();
+  const synth = window.speechSynthesis;
+
+  if(!italianVoice) italianVoice = pickItalianVoice(); // le voci possono arrivare in ritardo su alcuni browser mobili
+  let voice = italianVoice;
+  if(!voice){
+    // nessuna voce italiana installata: meglio una voce qualsiasi che il silenzio totale
+    const all = synth.getVoices();
+    if(all.length) voice = all[0];
+  }
+
+  const utter = new SpeechSynthesisUtterance(text);
+  // La lingua deve corrispondere alla voce scelta: forzare 'it-IT' quando si
+  // usa una voce di fallback in un'altra lingua fa fallire la sintesi in
+  // silenzio su Safari/iOS se non c'è alcun pacchetto vocale italiano installato.
+  utter.lang = voice ? voice.lang : 'it-IT';
+  if(voice) utter.voice = voice;
+  utter.rate = 1.05;
+
+  const finishAndAdvance = () => {
+    speechBusy = false;
+    livingUtterances = livingUtterances.filter(u => u !== utter);
+    pumpSpeechQueue(); // solo ora, a frase davvero conclusa, si passa alla prossima in coda
+  };
+  utter.onerror = (e) => { console.warn('Sintesi vocale non riuscita:', e.error); finishAndAdvance(); };
+  utter.onend = finishAndAdvance;
+
+  livingUtterances.push(utter);
+  speechBusy = true;
+  try{
+    if(synth.paused) synth.resume();
+    synth.speak(utter); // nessun cancel() prima: qui la coda è sempre vuota (o è la primissima chiamata,
+                         // nello stesso istante del gesto dell'utente — necessario per sbloccare Safari/iOS)
+  } catch(e){
+    console.warn('Sintesi vocale non disponibile:', e);
+    finishAndAdvance();
+  }
+}
+
+// Interrompe subito qualunque frase in corso o in coda: usato solo quando è
+// l'utente stesso a disattivare il vocale, mai per far posto a un annuncio
+// successivo (quelli restano sempre in coda, mai sovrapposti).
+function clearSpeechQueue(){
+  speechQueue = [];
+  speechBusy = false;
+  livingUtterances = [];
+  try{ window.speechSynthesis.cancel(); } catch(e){ /* sintesi non disponibile */ }
+}
+
+function updateVoiceBtn(){
+  voiceBtn.textContent = voiceEnabled
+    ? '🔊 Vocale attivo — tocca per disattivare'
+    : '🔈 Vocale disattivato — tocca per attivare';
+  voiceBtn.classList.toggle('primary', voiceEnabled);
+}
+
+voiceBtn.addEventListener('click', () => {
+  if(!speechSupported) return;
+  voiceEnabled = !voiceEnabled;
+  updateVoiceBtn();
+  if(voiceEnabled){
+    if(window.speechSynthesis.getVoices().length === 0){
+      pushFeedback('Il telefono non risulta avere nessuna voce di sintesi installata: il vocale potrebbe non funzionare.', false);
+    }
+    // il tocco sblocca la sintesi vocale su Safari/iOS e conferma l'attivazione
+    speak('Feedback vocale attivato');
+    setTimeout(() => {
+      // se dopo un paio di secondi la coda risulta ancora "occupata", la prima
+      // frase non è mai partita davvero: quasi sempre è l'interruttore
+      // silenzioso/la modalità silenziosa del telefono (iPhone), non un bug della pagina.
+      if(speechBusy){
+        pushFeedback('Non senti nessun suono? Controlla l\'interruttore silenzioso o la modalità silenziosa del telefono e il volume: la sintesi vocale li rispetta anche se il resto dell\'app funziona.', false);
+      }
+    }, 2000);
+  } else {
+    clearSpeechQueue();
+  }
+});
+if(speechSupported) updateVoiceBtn();
+
+// --- registro esercizi ---
+const EXERCISES = {
+  squat: {
+    label: 'Squat',
+    mode: 'reps',
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, a figura intera: serve vedere l'angolo del ginocchio e l'inclinazione della schiena.",
+    howto: [
+      'Piedi alla larghezza delle spalle, punte leggermente verso l\'esterno.',
+      'Piega ginocchia e anche insieme, come per sederti su una sedia.',
+      'Scendi mantenendo il petto alto e il peso sui talloni.',
+      'Risali spingendo sui talloni fino a distendere le gambe.'
+    ],
+    metricLabels: ['Ginocchio', 'Busto'],
+    muscles: { visual:['thighs','hips','core'], text:['Quadricipiti','Glutei','Femorali','Core'] },
+    thresholds: { kneeMin: 65, kneeDownEnter: 100, kneeUpExit: 160, backMax: 45 },
+    calib: {
+      steps: [
+        { prompt: "Stai in piedi, gambe dritte, di lato alla fotocamera.",
+          sample(lm){ const s = pickSide(lm); return { knee: angleBetween(s.hip, s.knee, s.ankle), back: angleFromVertical(s.shoulder, s.hip) }; } },
+        { prompt: "Scendi nello squat più profondo che consideri corretto e resta fermo.",
+          sample(lm){ const s = pickSide(lm); return { knee: angleBetween(s.hip, s.knee, s.ankle), back: angleFromVertical(s.shoulder, s.hip) }; } }
+      ],
+      apply(vals, t){
+        const standKnee = Math.max(vals[0].knee, vals[1].knee);
+        const deepKnee = Math.min(vals[0].knee, vals[1].knee);
+        if(standKnee - deepKnee < 25) return false; // movimento troppo simile tra i due passi: non calibro
+        const backRef = Math.max(vals[0].back, vals[1].back);
+        t.kneeMin = Math.max(40, Math.round(deepKnee - 12));
+        t.kneeDownEnter = Math.max(t.kneeMin + 15, Math.round((standKnee + deepKnee) / 2));
+        t.kneeUpExit = Math.max(t.kneeDownEnter + 10, Math.round(standKnee - 8));
+        t.backMax = Math.max(15, Math.round(backRef + 10));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide(lm);
+      const kneeAngle = angleBetween(s.hip, s.knee, s.ankle);
+      const backAngle = angleFromVertical(s.shoulder, s.hip);
+      if(kneeAngle == null) return null;
+
+      const kneeOk = kneeAngle >= t.kneeMin;
+      const backOk = backAngle <= t.backMax;
+      const kneeOverToe = kneeOverToeRatio(s.ankle, s.knee, s.toe);
+      const kneeOverToeBad = kneeOverToe !== null && kneeOverToe > 1.15;
+      const issues = [];
+      if(!kneeOk) issues.push('Sei sceso troppo: rischio sulle ginocchia, risali leggermente.');
+      if(!backOk) issues.push('Busto troppo inclinato in avanti: tieni il petto più alto.');
+      if(kneeOverToeBad) issues.push('Il ginocchio supera troppo la punta del piede: sposta il peso verso i talloni.');
+      const ok = issues.length === 0;
+
+      if(exState.phase === undefined){ exState.phase = 'up'; exState.repHadIssue = false; exState.issueSince = null; }
+      if(exState.phase === 'up' && kneeAngle < t.kneeDownEnter){
+        exState.phase = 'down';
+        exState.repHadIssue = false;
+        exState.issueSince = null;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'down'){
+        trackFormIssue(issues.length > 0, issues[0]);
+        if(kneeAngle > t.kneeUpExit){
+          exState.phase = 'up';
+          const tooFast = repTooFast(exState.phaseStart);
+          const invalidParts = tooFast ? 'Movimento troppo rapido o instabile: ripetizione non conteggiata.' : rejectRepSequence(exState.lastIssueMsg);
+          completeRep(exState.repHadIssue || tooFast, invalidParts, 'Buona profondità, schiena in asse.');
+          exState.repHadIssue = false;
+          exState.issueSince = null;
+        }
+      }
+
+      return {
+        ok,
+        statusMsg: issues.length ? issues[0] : (kneeAngle > t.kneeUpExit ? 'Posizione in piedi' : 'Discesa — forma corretta'),
+        metrics: [
+          { value: Math.round(kneeAngle) + '°', ok: kneeOk },
+          { value: Math.round(backAngle) + '°', ok: backOk }
+        ]
+      };
+    }
+  },
+
+  lunge: {
+    label: 'Affondo',
+    mode: 'reps',
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, a figura intera: serve vedere entrambe le gambe e il busto.",
+    howto: [
+      'Fai un passo in avanti con una gamba.',
+      'Piega entrambe le ginocchia fino a circa 90°: il ginocchio dietro sfiora quasi terra.',
+      'Il busto resta eretto, il ginocchio davanti non supera la punta del piede.',
+      'Spingi sul tallone anteriore per tornare in piedi.'
+    ],
+    metricLabels: ['Ginocchio anteriore', 'Busto'],
+    muscles: { visual:['thighs','hips'], text:['Quadricipiti','Glutei','Femorali','Stabilizzatori del core'] },
+    thresholds: { kneeMin: 75, kneeDownEnter: 100, kneeUpExit: 155, backMax: 25 },
+    calib: {
+      steps: [
+        { prompt: "Stai in piedi, gambe dritte, di lato alla fotocamera.",
+          sample(lm){ const kneeL = angleBetween(lm[23], lm[25], lm[27]); const kneeR = angleBetween(lm[24], lm[26], lm[28]); const s = pickSide(lm); return { knee: Math.min(kneeL, kneeR), back: angleFromVertical(s.shoulder, s.hip) }; } },
+        { prompt: "Scendi nell'affondo più profondo che consideri corretto e resta fermo.",
+          sample(lm){ const kneeL = angleBetween(lm[23], lm[25], lm[27]); const kneeR = angleBetween(lm[24], lm[26], lm[28]); const s = pickSide(lm); return { knee: Math.min(kneeL, kneeR), back: angleFromVertical(s.shoulder, s.hip) }; } }
+      ],
+      apply(vals, t){
+        const standKnee = Math.max(vals[0].knee, vals[1].knee);
+        const deepKnee = Math.min(vals[0].knee, vals[1].knee);
+        if(standKnee - deepKnee < 25) return false;
+        const backRef = Math.max(vals[0].back, vals[1].back);
+        t.kneeMin = Math.max(45, Math.round(deepKnee - 10));
+        t.kneeDownEnter = Math.max(t.kneeMin + 15, Math.round((standKnee + deepKnee) / 2));
+        t.kneeUpExit = Math.max(t.kneeDownEnter + 10, Math.round(standKnee - 10));
+        t.backMax = Math.max(10, Math.round(backRef + 8));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const kneeL = angleBetween(lm[23], lm[25], lm[27]);
+      const kneeR = angleBetween(lm[24], lm[26], lm[28]);
+      if(kneeL == null || kneeR == null) return null;
+      const workingKnee = Math.min(kneeL, kneeR);
+      const workingLeft = kneeL <= kneeR;
+      const s = pickSide(lm);
+      const backAngle = angleFromVertical(s.shoulder, s.hip);
+      const kneeOverToe = workingLeft
+        ? kneeOverToeRatio(lm[27], lm[25], lm[31])
+        : kneeOverToeRatio(lm[28], lm[26], lm[32]);
+      const kneeOverToeBad = kneeOverToe !== null && kneeOverToe > 1.15;
+
+      const kneeOk = workingKnee >= t.kneeMin;
+      const backOk = backAngle <= t.backMax;
+      const issues = [];
+      if(!kneeOk) issues.push('Ginocchio anteriore troppo piegato: rischio articolare, risali leggermente.');
+      if(!backOk) issues.push('Busto troppo inclinato: mantieni il tronco più eretto.');
+      if(kneeOverToeBad) issues.push('Il ginocchio anteriore supera troppo la punta del piede: fai un passo più lungo.');
+      const ok = issues.length === 0;
+
+      if(exState.phase === undefined){ exState.phase = 'up'; exState.repHadIssue = false; exState.issueSince = null; }
+      if(exState.phase === 'up' && workingKnee < t.kneeDownEnter){
+        exState.phase = 'down';
+        exState.repHadIssue = false;
+        exState.issueSince = null;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'down'){
+        trackFormIssue(issues.length > 0, issues[0]);
+        if(workingKnee > t.kneeUpExit){
+          exState.phase = 'up';
+          const tooFast = repTooFast(exState.phaseStart);
+          const invalidParts = tooFast ? 'Movimento troppo rapido o instabile: ripetizione non conteggiata.' : rejectRepSequence(exState.lastIssueMsg);
+          completeRep(exState.repHadIssue || tooFast, invalidParts, 'Affondo profondo, forma corretta.');
+          exState.repHadIssue = false;
+          exState.issueSince = null;
+        }
+      }
+
+      return {
+        ok,
+        statusMsg: issues.length ? issues[0] : (workingKnee > t.kneeUpExit ? 'Posizione in piedi' : 'Discesa — forma corretta'),
+        metrics: [
+          { value: Math.round(workingKnee) + '°', ok: kneeOk },
+          { value: Math.round(backAngle) + '°', ok: backOk }
+        ]
+      };
+    }
+  },
+
+  pushup: {
+    label: 'Flessioni',
+    mode: 'reps',
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, a figura intera: serve vedere il gomito e la linea spalla-anca-caviglia.",
+    howto: [
+      'Mani a terra poco più larghe delle spalle, corpo in linea retta dalle spalle alle caviglie.',
+      'Piega i gomiti abbassando il petto verso il pavimento.',
+      'Scendi fino a circa 90° di gomito, senza far cadere il bacino.',
+      'Spingi sulle mani per tornare a braccia tese.'
+    ],
+    metricLabels: ['Gomito', 'Linea corpo'],
+    muscles: { visual:['chest','arms','shoulders','core'], text:['Pettorali','Tricipiti','Spalle','Core'] },
+    thresholds: { elbowMin: 60, elbowDownEnter: 100, elbowUpExit: 150, bodyMin: 160, bodyMax: 200 },
+    calib: {
+      steps: [
+        { prompt: "Braccia completamente estese, corpo in linea retta, di lato alla fotocamera.",
+          sample(lm){ const s = pickSide(lm); return { elbow: angleBetween(s.shoulder, s.elbow, s.wrist), body: angleBetween(s.shoulder, s.hip, s.ankle) }; } },
+        { prompt: "Scendi fino alla profondità massima che consideri corretta e resta fermo.",
+          sample(lm){ const s = pickSide(lm); return { elbow: angleBetween(s.shoulder, s.elbow, s.wrist), body: angleBetween(s.shoulder, s.hip, s.ankle) }; } }
+      ],
+      apply(vals, t){
+        const extended = Math.max(vals[0].elbow, vals[1].elbow);
+        const bent = Math.min(vals[0].elbow, vals[1].elbow);
+        if(extended - bent < 25) return false;
+        const bodyLow = Math.min(vals[0].body, vals[1].body);
+        const bodyHigh = Math.max(vals[0].body, vals[1].body);
+        t.elbowMin = Math.max(30, Math.round(bent - 10));
+        t.elbowDownEnter = Math.max(t.elbowMin + 15, Math.round((extended + bent) / 2));
+        t.elbowUpExit = Math.max(t.elbowDownEnter + 10, Math.round(extended - 10));
+        t.bodyMin = Math.max(120, Math.round(bodyLow - 8));
+        t.bodyMax = Math.max(t.bodyMin + 20, Math.round(bodyHigh + 15));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide(lm);
+      const elbowAngle = angleBetween(s.shoulder, s.elbow, s.wrist);
+      const bodyAngle = angleBetween(s.shoulder, s.hip, s.ankle);
+      if(elbowAngle == null || bodyAngle == null) return null;
+
+      const bodyOk = bodyAngle >= t.bodyMin && bodyAngle <= t.bodyMax;
+      const elbowOk = elbowAngle >= t.elbowMin;
+      const issues = [];
+      if(bodyAngle < t.bodyMin) issues.push('Bacino troppo basso: mantieni il corpo in linea retta da spalle a caviglie.');
+      else if(bodyAngle > t.bodyMax) issues.push('Bacino troppo alto: non sollevare i fianchi a punta.');
+      if(!elbowOk) issues.push('Sei sceso troppo: non serve andare oltre i 90° di gomito.');
+      const ok = issues.length === 0;
+
+      if(exState.phase === undefined){ exState.phase = 'up'; exState.repHadIssue = false; exState.issueSince = null; }
+      if(exState.phase === 'up' && elbowAngle < t.elbowDownEnter){
+        exState.phase = 'down';
+        exState.repHadIssue = false;
+        exState.issueSince = null;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'down'){
+        trackFormIssue(issues.length > 0, issues[0]);
+        if(elbowAngle > t.elbowUpExit){
+          exState.phase = 'up';
+          const tooFast = repTooFast(exState.phaseStart);
+          const invalidParts = tooFast ? 'Movimento troppo rapido o instabile: ripetizione non conteggiata.' : rejectRepSequence(exState.lastIssueMsg);
+          completeRep(exState.repHadIssue || tooFast, invalidParts, 'Discesa controllata, corpo in linea.');
+          exState.repHadIssue = false;
+          exState.issueSince = null;
+        }
+      }
+
+      return {
+        ok,
+        statusMsg: issues.length ? issues[0] : (elbowAngle > t.elbowUpExit ? 'Braccia estese' : 'Discesa — forma corretta'),
+        metrics: [
+          { value: Math.round(elbowAngle) + '°', ok: elbowOk },
+          { value: Math.round(bodyAngle) + '°', ok: bodyOk }
+        ]
+      };
+    }
+  },
+
+  plank: {
+    label: 'Plank',
+    mode: 'timer',
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, a figura intera: serve vedere la linea spalla-anca-caviglia.",
+    howto: [
+      'Avambracci a terra sotto le spalle, gambe distese dietro.',
+      'Corpo in linea retta da spalle a caviglie, senza far cadere né alzare il bacino.',
+      'Contrai addominali e glutei, mantieni la posizione respirando normalmente.'
+    ],
+    metricLabels: ['Linea corpo'],
+    muscles: { visual:['core'], text:['Addominali','Lombari','Spalle (stabilizzazione)'] },
+    thresholds: { bodyMin: 165, bodyMax: 195 },
+    calib: {
+      steps: [
+        { prompt: "Mantieni la posizione di plank corretta, corpo dritto da spalle a caviglie.",
+          sample(lm){ const s = pickSide(lm); return { body: angleBetween(s.shoulder, s.hip, s.ankle) }; } }
+      ],
+      apply(vals, t){
+        const ref = vals[0].body;
+        t.bodyMin = Math.round(ref - 13);
+        t.bodyMax = Math.round(ref + 13);
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide(lm);
+      const bodyAngle = angleBetween(s.shoulder, s.hip, s.ankle);
+      if(bodyAngle == null) return null;
+
+      const issues = [];
+      const straight = bodyAngle >= t.bodyMin && bodyAngle <= t.bodyMax;
+      const warnLow = t.bodyMin - 15;
+      if(bodyAngle < t.bodyMin && bodyAngle >= warnLow) issues.push('Anche leggermente basse: contrai addominali e glutei.');
+      else if(bodyAngle < warnLow) issues.push('Bacino troppo basso: rischio per la zona lombare, sollevalo.');
+      else if(bodyAngle > t.bodyMax) issues.push('Bacino troppo alto: abbassa leggermente per allineare il corpo.');
+
+      const ok = issues.length === 0;
+      if(ok && Math.random() < 0.02) pushFeedback('Linea corpo perfetta, continua così.', true);
+      else if(!ok && Math.random() < 0.15) pushFeedback(issues[0], false);
+
+      return {
+        ok,
+        statusMsg: ok ? 'Plank corretto' : issues[0],
+        metrics: [{ value: Math.round(bodyAngle) + '°', ok: straight }]
+      };
+    }
+  },
+
+  sideplank: {
+    label: 'Plank laterale',
+    mode: 'timer',
+    view: 'frontale',
+    viewNote: "Sdraiati su un fianco a terra, con la fotocamera davanti a te: serve vedere il fianco appoggiato e la linea del corpo da spalla a caviglia.",
+    howto: [
+      'Sdraiati su un fianco, appoggiato sull\'avambraccio con il gomito sotto la spalla.',
+      'Solleva il bacino da terra fino ad allineare spalla, anca e caviglia.',
+      'Tieni il corpo dritto come una tavola, senza far cadere il fianco.'
+    ],
+    metricLabels: ['Linea corpo'],
+    muscles: { visual:['core'], text:['Obliqui','Core','Spalle'] },
+    thresholds: { bodyMin: 160, bodyMax: 200 },
+    calib: {
+      steps: [
+        { prompt: "Mantieni la posizione di plank laterale corretta, corpo allineato.",
+          sample(lm){ const s = pickSide(lm); return { body: angleBetween(s.shoulder, s.hip, s.ankle) }; } }
+      ],
+      apply(vals, t){
+        const ref = vals[0].body;
+        t.bodyMin = Math.round(ref - 20);
+        t.bodyMax = Math.round(ref + 20);
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide(lm);
+      const bodyAngle = angleBetween(s.shoulder, s.hip, s.ankle);
+      if(bodyAngle == null) return null;
+
+      const straight = bodyAngle >= t.bodyMin && bodyAngle <= t.bodyMax;
+      const issues = [];
+      if(!straight) issues.push('Bacino non allineato: mantieni fianchi, spalle e caviglie sulla stessa linea.');
+      const ok = issues.length === 0;
+      if(ok && Math.random() < 0.02) pushFeedback('Ottimo allineamento, tieni duro.', true);
+      else if(!ok && Math.random() < 0.15) pushFeedback(issues[0], false);
+
+      return {
+        ok,
+        statusMsg: ok ? 'Plank laterale corretto' : issues[0],
+        metrics: [{ value: Math.round(bodyAngle) + '°', ok: straight }]
+      };
+    }
+  },
+
+  glutebridge: {
+    label: 'Ponte glutei',
+    mode: 'reps',
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, sdraiato a terra nell'inquadratura: serve vedere anca e ginocchio.",
+    howto: [
+      'Sdraiato a terra, ginocchia piegate, piedi appoggiati vicino ai glutei.',
+      'Spingi sui talloni e solleva il bacino verso l\'alto.',
+      'Stringi i glutei in alto, senza inarcare troppo la schiena.',
+      'Scendi controllando il movimento fino a sfiorare terra.'
+    ],
+    metricLabels: ['Estensione anca', 'Ginocchio'],
+    muscles: { visual:['hips','thighs'], text:['Glutei','Femorali','Lombari'] },
+    thresholds: { kneeMin: 70, kneeMax: 115, hipDownExit: 120, hipUpEnter: 155, hipTargetMin: 165, hipMax: 200 },
+    calib: {
+      steps: [
+        { prompt: "Sdraiato a terra, bacino appoggiato, ginocchia piegate.",
+          sample(lm){ const s = pickSide(lm); return { hip: angleBetween(s.shoulder, s.hip, s.knee), knee: angleBetween(s.hip, s.knee, s.ankle) }; } },
+        { prompt: "Solleva il bacino il più possibile mantenendo la forma corretta.",
+          sample(lm){ const s = pickSide(lm); return { hip: angleBetween(s.shoulder, s.hip, s.knee), knee: angleBetween(s.hip, s.knee, s.ankle) }; } }
+      ],
+      apply(vals, t){
+        const hipLow = Math.min(vals[0].hip, vals[1].hip);
+        const hipHigh = Math.max(vals[0].hip, vals[1].hip);
+        if(hipHigh - hipLow < 25) return false;
+        const kneeRef = (vals[0].knee + vals[1].knee) / 2;
+        t.kneeMin = Math.max(40, Math.round(kneeRef - 20));
+        t.kneeMax = Math.round(kneeRef + 20);
+        t.hipDownExit = Math.round(hipLow + 15);
+        t.hipUpEnter = Math.max(t.hipDownExit + 10, Math.round((hipLow + hipHigh) / 2));
+        t.hipTargetMin = Math.max(t.hipUpEnter + 5, Math.round(hipHigh - 8));
+        t.hipMax = Math.max(t.hipTargetMin + 10, Math.round(hipHigh + 15));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide(lm);
+      const hipAngle = angleBetween(s.shoulder, s.hip, s.knee);
+      const kneeAngle = angleBetween(s.hip, s.knee, s.ankle);
+      if(hipAngle == null || kneeAngle == null) return null;
+
+      const kneeOk = kneeAngle >= t.kneeMin && kneeAngle <= t.kneeMax;
+      const issues = [];
+      if(!kneeOk) issues.push('Piedi troppo vicini o lontani dai glutei: avvicina o allontana leggermente.');
+
+      if(exState.phase === undefined){ exState.phase = 'down'; exState.repHadIssue = false; exState.issueSince = null; exState.reachedTarget = false; }
+      trackFormIssue(!kneeOk, 'Piedi troppo vicini o lontani dai glutei: avvicina o allontana leggermente.');
+      if(exState.phase === 'down' && hipAngle > t.hipUpEnter){
+        exState.phase = 'up';
+        exState.reachedTarget = false;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'up'){
+        // "hipUpEnter" segna solo l'inizio della salita: il bacino raggiunge
+        // "hipTargetMin" più avanti, per questo va controllato lungo tutta la
+        // fase attiva e non nell'istante esatto della transizione.
+        if(!exState.reachedTarget && hipAngle >= t.hipTargetMin && hipAngle <= t.hipMax){
+          exState.reachedTarget = true;
+        }
+        if(hipAngle > t.hipMax){
+          exState.repHadIssue = true; // inarcamento eccessivo: evento netto, non serve debounce
+          exState.lastIssueMsg = 'Bacino inarcato troppo in alto: non forzare oltre l\'estensione naturale dell\'anca.';
+        }
+        if(hipAngle < t.hipDownExit){
+          exState.phase = 'down';
+          const tooFast = repTooFast(exState.phaseStart);
+          let invalidParts;
+          if(tooFast) invalidParts = 'Movimento troppo rapido o instabile: ripetizione non conteggiata.';
+          else if(!exState.reachedTarget) invalidParts = rejectRepSequence('Bacino non sollevato abbastanza: solleva di più per estendere bene l\'anca.');
+          else if(exState.repHadIssue) invalidParts = rejectRepSequence(exState.lastIssueMsg);
+          completeRep(tooFast || !exState.reachedTarget || exState.repHadIssue, invalidParts, 'Bacino ben esteso in alto.');
+          exState.repHadIssue = false;
+          exState.issueSince = null;
+        }
+      }
+      if(exState.phase === 'up' && !exState.reachedTarget) issues.push('Solleva di più il bacino per estendere bene l\'anca.');
+      if(exState.phase === 'up' && hipAngle > t.hipMax) issues.push('Non inarcare troppo la parte bassa della schiena in alto.');
+
+      const ok = kneeOk && (exState.phase === 'down' || (hipAngle >= t.hipTargetMin && hipAngle <= t.hipMax));
+
+      return {
+        ok,
+        statusMsg: issues.length ? issues[0] : (exState.phase === 'up' ? 'Bacino sollevato — forma corretta' : 'Posizione a terra'),
+        metrics: [
+          { value: Math.round(hipAngle) + '°', ok: exState.phase === 'up' ? (hipAngle >= t.hipTargetMin && hipAngle <= t.hipMax) : null },
+          { value: Math.round(kneeAngle) + '°', ok: kneeOk }
+        ]
+      };
+    }
+  },
+
+  jumpingjack: {
+    label: 'Jumping jack',
+    mode: 'reps',
+    view: 'frontale',
+    viewNote: "Inquadrati frontalmente, a figura intera, con spazio ai lati per aprire braccia e gambe.",
+    howto: [
+      'Parti in piedi, braccia lungo i fianchi, gambe unite.',
+      'Salta aprendo gambe e braccia sopra la testa contemporaneamente.',
+      'Salta di nuovo per richiudere le gambe e riportare le braccia lungo i fianchi.'
+    ],
+    metricLabels: ['Apertura gambe', 'Braccia'],
+    muscles: { visual:['shoulders','arms','thighs','calves','core'], text:['Spalle','Gambe','Core','Sistema cardiovascolare (corpo intero)'] },
+    evaluate(lm){
+      const lSh = lm[11], rSh = lm[12], lWr = lm[15], rWr = lm[16];
+      const lHip = lm[23], rHip = lm[24], lAnk = lm[27], rAnk = lm[28];
+      if(!lSh || !rSh || !lWr || !rWr || !lHip || !rHip || !lAnk || !rAnk) return null;
+
+      const armsUp = lWr.y < lSh.y && rWr.y < rSh.y;
+      const armsAsym = (lWr.y < lSh.y) !== (rWr.y < rSh.y);
+      const hipDist = Math.abs(lHip.x - rHip.x) || 0.01;
+      const ankleDist = Math.abs(lAnk.x - rAnk.x);
+      const spreadRatio = ankleDist / hipDist;
+      const feetApart = spreadRatio > 1.6;
+      const feetTogether = spreadRatio < 1.15;
+
+      const issues = [];
+      if(armsAsym) issues.push('Muovi entrambe le braccia insieme, in modo simmetrico.');
+      if(armsUp && !feetApart) issues.push('Apri di più le gambe quando alzi le braccia.');
+      const ok = issues.length === 0;
+
+      if(exState.phase === undefined){ exState.phase = 'closed'; exState.repHadIssue = false; exState.issueSince = null; }
+      const open = armsUp && feetApart;
+      const closed = !armsUp && feetTogether;
+      if(exState.phase === 'closed' && open){
+        exState.phase = 'open';
+        exState.repHadIssue = false;
+        exState.issueSince = null;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'open'){
+        trackFormIssue(issues.length > 0, issues[0]);
+        if(closed){
+          exState.phase = 'closed';
+          const tooFast = repTooFast(exState.phaseStart);
+          const invalidParts = tooFast ? 'Movimento troppo rapido o instabile: ripetizione non conteggiata.' : rejectRepSequence(exState.lastIssueMsg);
+          completeRep(exState.repHadIssue || tooFast, invalidParts, 'Movimento ampio e sincronizzato.');
+          exState.repHadIssue = false;
+          exState.issueSince = null;
+        }
+      }
+      if(issues.length && Math.random() < 0.2) pushFeedback(issues[0], false);
+
+      return {
+        ok,
+        statusMsg: issues.length ? issues[0] : (exState.phase === 'open' ? 'Braccia e gambe aperte' : 'Posizione chiusa'),
+        metrics: [
+          { value: Math.round(spreadRatio*100) + '%', ok: exState.phase === 'open' ? feetApart : null },
+          { value: armsUp ? 'Alzate' : 'Basse', ok: null }
+        ]
+      };
+    }
+  },
+
+  mountainclimber: {
+    label: 'Mountain climber',
+    mode: 'reps',
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, a figura intera, in posizione plank: serve vedere anca e ginocchia.",
+    howto: [
+      'Posizione di plank, mani sotto le spalle, corpo in linea.',
+      'Porta un ginocchio verso il petto senza alzare il bacino.',
+      'Torna con la gamba estesa e ripeti con l\'altra, alternando velocemente.'
+    ],
+    metricLabels: ['Ginocchio in movimento', 'Linea plank'],
+    muscles: { visual:['core','shoulders','thighs'], text:['Core','Spalle','Flessori dell\'anca','Gambe','Sistema cardiovascolare'] },
+    evaluate(lm){
+      const kneeL = angleBetween(lm[23], lm[25], lm[27]);
+      const kneeR = angleBetween(lm[24], lm[26], lm[28]);
+      if(kneeL == null || kneeR == null) return null;
+      const workingKnee = Math.min(kneeL, kneeR);
+      const extendedIsLeft = kneeL >= kneeR;
+      const s = extendedIsLeft
+        ? { shoulder: lm[11], hip: lm[23], ankle: lm[27] }
+        : { shoulder: lm[12], hip: lm[24], ankle: lm[28] };
+      const plankAngle = angleBetween(s.shoulder, s.hip, s.ankle);
+      if(plankAngle == null) return null;
+
+      const plankOk = plankAngle >= 150 && plankAngle <= 205;
+      const issues = [];
+      if(!plankOk) issues.push('Bacino non allineato: mantieni la posizione plank mentre porti il ginocchio avanti.');
+      const ok = issues.length === 0;
+
+      if(exState.phase === undefined){ exState.phase = 'out'; exState.repHadIssue = false; exState.issueSince = null; }
+      if(exState.phase === 'out' && workingKnee < 90){
+        exState.phase = 'in';
+        exState.repHadIssue = false;
+        exState.issueSince = null;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'in'){
+        trackFormIssue(issues.length > 0, issues[0]);
+        if(workingKnee > 150){
+          exState.phase = 'out';
+          const tooFast = repTooFast(exState.phaseStart);
+          const invalidParts = tooFast ? 'Movimento troppo rapido o instabile: ripetizione non conteggiata.' : rejectRepSequence(exState.lastIssueMsg);
+          completeRep(exState.repHadIssue || tooFast, invalidParts, 'Buona spinta del ginocchio, bacino stabile.');
+          exState.repHadIssue = false;
+          exState.issueSince = null;
+        }
+      }
+
+      return {
+        ok,
+        statusMsg: issues.length ? issues[0] : (exState.phase === 'in' ? 'Ginocchio al petto' : 'Gamba estesa'),
+        metrics: [
+          { value: Math.round(workingKnee) + '°', ok: exState.phase === 'in' ? workingKnee < 90 : null },
+          { value: Math.round(plankAngle) + '°', ok: plankOk }
+        ]
+      };
+    }
+  },
+
+  burpee: {
+    label: 'Burpee',
+    mode: 'reps',
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, con spazio sopra e sotto per vedere sia la posizione a terra sia il salto in piedi.",
+    howto: [
+      'Parti in piedi, poi accovacciati e appoggia le mani a terra.',
+      'Butta le gambe indietro fino alla posizione di plank (o flessione).',
+      'Riporta i piedi verso le mani e salta in alto con le braccia sopra la testa.'
+    ],
+    metricLabels: ['Altezza anca', 'Fase'],
+    muscles: { visual:['chest','arms','shoulders','core','thighs','calves'], text:['Corpo intero — Pettorali','Gambe','Core','Spalle','Sistema cardiovascolare'] },
+    evaluate(lm){
+      const s = pickSide(lm);
+      const kneeAngle = angleBetween(s.hip, s.knee, s.ankle);
+      if(kneeAngle == null || s.hip.y == null) return null;
+      const hipY = s.hip.y; // 0 = alto del frame, 1 = basso del frame
+
+      if(exState.phase === undefined) exState.phase = 'up';
+      const isDown = hipY > 0.62 || kneeAngle < 70;
+      const isUp = hipY < 0.4 && kneeAngle > 150;
+
+      if(exState.phase === 'up' && isDown){
+        exState.phase = 'down';
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'down' && isUp){
+        exState.phase = 'up';
+        completeRep(repTooFast(exState.phaseStart), 'Movimento troppo rapido o instabile: ripetizione non conteggiata.', 'Ciclo completo: a terra e di nuovo in piedi.');
+      }
+
+      return {
+        ok: true,
+        statusMsg: exState.phase === 'down' ? 'Fase a terra' : 'Fase in piedi',
+        metrics: [
+          { value: Math.round(hipY*100) + '%', ok: null },
+          { value: exState.phase === 'down' ? 'A terra' : 'In piedi', ok: null }
+        ]
+      };
+    }
+  },
+
+  crunch: {
+    label: 'Crunch',
+    mode: 'reps',
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, sdraiato con le ginocchia piegate: serve vedere spalla, anca e ginocchio.",
+    howto: [
+      'Sdraiato a terra, ginocchia piegate, piedi a terra, mani dietro la testa o incrociate sul petto.',
+      'Solleva le spalle da terra contraendo gli addominali, senza tirare il collo.',
+      'Scendi controllando il movimento senza sbattere la testa a terra tra una ripetizione e l\'altra.'
+    ],
+    metricLabels: ['Flessione busto'],
+    muscles: { visual:['core'], text:['Retto addominale','Obliqui'] },
+    thresholds: { downExit: 165, upEnter: 140, curledMax: 128 },
+    calib: {
+      steps: [
+        { prompt: "Sdraiato a terra, busto disteso, ginocchia piegate.",
+          sample(lm){ const s = pickSide(lm); return { torso: angleBetween(s.shoulder, s.hip, s.knee) }; } },
+        { prompt: "Sali con il busto fino alla contrazione massima corretta.",
+          sample(lm){ const s = pickSide(lm); return { torso: angleBetween(s.shoulder, s.hip, s.knee) }; } }
+      ],
+      apply(vals, t){
+        const rest = Math.max(vals[0].torso, vals[1].torso);
+        const up = Math.min(vals[0].torso, vals[1].torso);
+        if(rest - up < 20) return false;
+        t.downExit = Math.round(rest - 10);
+        t.upEnter = Math.min(t.downExit - 10, Math.round((rest + up) / 2));
+        t.curledMax = Math.min(t.upEnter - 5, Math.round(up + 8));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide(lm);
+      const torsoAngle = angleBetween(s.shoulder, s.hip, s.knee);
+      if(torsoAngle == null) return null;
+      const curled = torsoAngle < t.curledMax;
+
+      if(exState.phase === undefined){ exState.phase = 'down'; exState.reachedTarget = false; }
+      if(exState.phase === 'down' && torsoAngle < t.upEnter){
+        exState.phase = 'up';
+        exState.reachedTarget = false;
+        exState.phaseStart = performance.now();
+      }
+      if(exState.phase === 'up' && curled) exState.reachedTarget = true;
+      if(exState.phase === 'up' && torsoAngle > t.downExit){
+        exState.phase = 'down';
+        const tooFast = repTooFast(exState.phaseStart);
+        const invalidParts = tooFast
+          ? 'Movimento troppo rapido o instabile: ripetizione non conteggiata.'
+          : rejectRepSequence('Contrai di più il busto per completare il crunch.');
+        completeRep(tooFast || !exState.reachedTarget, invalidParts, 'Buona contrazione, ottima escursione.');
+      }
+
+      const ok = exState.phase === 'down' || curled;
+
+      return {
+        ok,
+        statusMsg: exState.phase === 'up' ? (curled ? 'Busto sollevato — contrazione completa' : 'Sali ancora con il busto') : 'Posizione a terra',
+        metrics: [{ value: Math.round(torsoAngle) + '°', ok: exState.phase === 'up' ? curled : null }]
+      };
+    }
+  },
+
+  legraise: {
+    label: 'Sollevamento gambe',
+    mode: 'reps',
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, sdraiato con le gambe distese: serve vedere spalla, anca e caviglia.",
+    howto: [
+      'Sdraiato a terra, gambe distese, mani lungo i fianchi o sotto i glutei per stabilità.',
+      'Solleva le gambe unite fino a circa 90°, senza piegare le ginocchia.',
+      'Scendi lentamente controllando il movimento, senza far toccare terra fino a fine serie.'
+    ],
+    metricLabels: ['Sollevamento gambe'],
+    muscles: { visual:['core'], text:['Retto addominale (parte bassa)','Flessori dell\'anca'] },
+    thresholds: { downExit: 160, upEnter: 100, raisedMax: 85 },
+    calib: {
+      steps: [
+        { prompt: "Sdraiato a terra, gambe distese sul pavimento.",
+          sample(lm){ const s = pickSide(lm); return { hip: angleBetween(s.shoulder, s.hip, s.ankle) }; } },
+        { prompt: "Solleva le gambe fino alla posizione corretta (circa 90°) e resta fermo.",
+          sample(lm){ const s = pickSide(lm); return { hip: angleBetween(s.shoulder, s.hip, s.ankle) }; } }
+      ],
+      apply(vals, t){
+        const rest = Math.max(vals[0].hip, vals[1].hip);
+        const up = Math.min(vals[0].hip, vals[1].hip);
+        if(rest - up < 20) return false;
+        t.downExit = Math.round(rest - 10);
+        t.upEnter = Math.min(t.downExit - 10, Math.round((rest + up) / 2));
+        t.raisedMax = Math.min(t.upEnter - 5, Math.round(up + 8));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide(lm);
+      const hipAngle = angleBetween(s.shoulder, s.hip, s.ankle);
+      if(hipAngle == null) return null;
+      const raised = hipAngle < t.raisedMax;
+
+      if(exState.phase === undefined){ exState.phase = 'down'; exState.reachedTarget = false; }
+      if(exState.phase === 'down' && hipAngle < t.upEnter){
+        exState.phase = 'up';
+        exState.reachedTarget = false;
+        exState.phaseStart = performance.now();
+      }
+      if(exState.phase === 'up' && raised) exState.reachedTarget = true;
+      if(exState.phase === 'up' && hipAngle > t.downExit){
+        exState.phase = 'down';
+        const tooFast = repTooFast(exState.phaseStart);
+        const invalidParts = tooFast
+          ? 'Movimento troppo rapido o instabile: ripetizione non conteggiata.'
+          : rejectRepSequence('Solleva di più le gambe per raggiungere la posizione corretta.');
+        completeRep(tooFast || !exState.reachedTarget, invalidParts, 'Ottimo, gambe sollevate alla posizione corretta.');
+      }
+
+      const ok = exState.phase === 'down' || raised;
+
+      return {
+        ok,
+        statusMsg: exState.phase === 'up' ? (raised ? 'Gambe sollevate — posizione corretta' : 'Solleva ancora le gambe') : 'Gambe a terra',
+        metrics: [{ value: Math.round(hipAngle) + '°', ok: exState.phase === 'up' ? raised : null }]
+      };
+    }
+  },
+
+  russiantwist: {
+    label: 'Russian twist',
+    mode: 'reps',
+    view: 'frontale',
+    viewNote: "Inquadrati frontalmente, seduto con il busto leggermente inclinato indietro: serve vedere polsi e spalle.",
+    howto: [
+      'Seduto a terra, ginocchia piegate, busto leggermente inclinato indietro.',
+      'Solleva un poco i piedi da terra (o tienili appoggiati se sei alle prime armi).',
+      'Ruota il busto portando le mani da un lato all\'altro, sfiorando terra a ogni lato.'
+    ],
+    metricLabels: ['Rotazione'],
+    muscles: { visual:['core'], text:['Obliqui','Retto addominale'] },
+    evaluate(lm){
+      const lWr = lm[15], rWr = lm[16], lSh = lm[11], rSh = lm[12];
+      if(!lWr || !rWr || !lSh || !rSh) return null;
+      const centerX = (lSh.x + rSh.x) / 2;
+      const wristCenterX = (lWr.x + rWr.x) / 2;
+      const shoulderWidth = Math.abs(lSh.x - rSh.x) || 0.01;
+      const offset = (wristCenterX - centerX) / shoulderWidth;
+      let side = 'centro';
+      if(offset > 0.5) side = 'destra';
+      else if(offset < -0.5) side = 'sinistra';
+
+      const avgWristY = (lWr.y + rWr.y) / 2;
+      const avgShoulderY = (lSh.y + rSh.y) / 2;
+      const handsTooHigh = avgWristY < avgShoulderY - 0.05;
+      const ok = !handsTooHigh;
+
+      if(exState.last === undefined){ exState.last = 'centro'; exState.lastSwitchAt = null; }
+      if((side === 'destra' || side === 'sinistra') && side !== exState.last){
+        exState.last = side;
+        const tooFast = repTooFast(exState.lastSwitchAt);
+        exState.lastSwitchAt = performance.now();
+        const invalidParts = tooFast
+          ? 'Movimento troppo rapido o instabile: torsione non conteggiata.'
+          : rejectRepSequence('Tieni le mani più basse, vicino all\'addome.');
+        completeRep(tooFast || handsTooHigh, invalidParts);
+      }
+
+      return {
+        ok,
+        statusMsg: handsTooHigh ? 'Mani troppo alte: abbassale verso l\'addome' : 'Torsione: ' + side,
+        metrics: [{ value: side.charAt(0).toUpperCase() + side.slice(1), ok: ok ? null : false }]
+      };
+    }
+  },
+
+  bicyclecrunch: {
+    label: 'Bicycle crunch',
+    mode: 'reps',
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, sdraiato con le mani dietro la testa: serve vedere gomito e ginocchio. Esercizio sperimentale: il movimento incrociato è difficile da validare in 2D, il conteggio è indicativo.",
+    howto: [
+      'Sdraiato a terra, mani dietro la testa, gambe sollevate con ginocchia piegate.',
+      'Porta il gomito verso il ginocchio opposto mentre l\'altra gamba si distende.',
+      'Alterna i lati con un movimento fluido, come se pedalassi.'
+    ],
+    metricLabels: ['Distanza gomito-ginocchio'],
+    muscles: { visual:['core'], text:['Obliqui','Retto addominale'] },
+    evaluate(lm){
+      const s = pickSide(lm);
+      const dist = Math.hypot(s.elbow.x - s.knee.x, s.elbow.y - s.knee.y);
+      if(isNaN(dist)) return null;
+
+      if(exState.phase === undefined) exState.phase = 'far';
+      if(exState.phase === 'far' && dist < 0.15){
+        exState.phase = 'near';
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'near' && dist > 0.28){
+        exState.phase = 'far';
+        completeRep(repTooFast(exState.phaseStart), 'Movimento troppo rapido o instabile: ripetizione non conteggiata.');
+      }
+
+      return {
+        ok: true,
+        statusMsg: exState.phase === 'near' ? 'Gomito-ginocchio vicini' : 'Estensione',
+        metrics: [{ value: dist.toFixed(2), ok: null }]
+      };
+    }
+  },
+
+  highknees: {
+    label: 'Ginocchia alte',
+    mode: 'reps',
+    view: 'frontale',
+    viewNote: "Inquadrati frontalmente, a figura intera: serve vedere anca e ginocchia mentre corri sul posto.",
+    howto: [
+      'Corri sul posto portando alternativamente le ginocchia verso l\'alto.',
+      'Porta il ginocchio almeno all\'altezza dell\'anca a ogni passo.',
+      'Mantieni il busto dritto e le braccia in movimento come nella corsa.'
+    ],
+    metricLabels: ['Ginocchio sollevato', 'Lato'],
+    muscles: { visual:['thighs','core','calves'], text:['Flessori dell\'anca','Core','Gambe','Sistema cardiovascolare'] },
+    evaluate(lm){
+      const lHip = lm[23], rHip = lm[24], lKnee = lm[25], rKnee = lm[26];
+      if(!lHip || !rHip || !lKnee || !rKnee) return null;
+      const hipY = (lHip.y + rHip.y) / 2;
+      const leftRaise = hipY - lKnee.y; // positivo se il ginocchio sinistro è sopra l'anca
+      const rightRaise = hipY - rKnee.y;
+      const raised = Math.max(leftRaise, rightRaise);
+      const raisedSide = leftRaise >= rightRaise ? 'sinistro' : 'destro';
+      const kneeHigh = raised > 0.02;
+
+      if(exState.phase === undefined){ exState.phase = 'down'; exState.phaseStart = null; }
+      if(exState.phase === 'down' && kneeHigh){
+        exState.phase = 'up';
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'up' && !kneeHigh){
+        exState.phase = 'down';
+        completeRep(repTooFast(exState.phaseStart), 'Movimento troppo rapido o instabile: ripetizione non conteggiata.');
+      }
+
+      return {
+        ok: true,
+        statusMsg: exState.phase === 'up' ? ('Ginocchio ' + raisedSide + ' sollevato') : 'Corsa sul posto',
+        metrics: [
+          { value: raised > 0 ? Math.round(raised * 100) + '%' : '0%', ok: null },
+          { value: exState.phase === 'up' ? raisedSide : '—', ok: null }
+        ]
+      };
+    }
+  },
+
+  wallsit: {
+    label: 'Sedia a muro',
+    mode: 'timer',
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, con la schiena appoggiata a un muro: serve vedere l'angolo del ginocchio.",
+    howto: [
+      'Schiena appoggiata a un muro, scendi finché le ginocchia formano un angolo di circa 90°.',
+      'Le ginocchia restano sopra le caviglie, non oltre la punta dei piedi.',
+      'Mantieni la posizione respirando normalmente, senza spingere sulle gambe con le mani.'
+    ],
+    metricLabels: ['Ginocchio'],
+    muscles: { visual:['thighs','calves'], text:['Quadricipiti','Glutei','Polpacci (stabilizzazione)'] },
+    thresholds: { kneeMin: 75, kneeMax: 110 },
+    calib: {
+      steps: [
+        { prompt: "Scendi nella posizione di sedia a muro corretta (ginocchia a circa 90°) e resta fermo.",
+          sample(lm){ const s = pickSide(lm); return { knee: angleBetween(s.hip, s.knee, s.ankle) }; } }
+      ],
+      apply(vals, t){
+        const ref = vals[0].knee;
+        t.kneeMin = Math.round(ref - 15);
+        t.kneeMax = Math.round(ref + 15);
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide(lm);
+      const kneeAngle = angleBetween(s.hip, s.knee, s.ankle);
+      if(kneeAngle == null) return null;
+      const ok = kneeAngle >= t.kneeMin && kneeAngle <= t.kneeMax;
+      let statusMsg;
+      if(ok) statusMsg = 'Posizione corretta';
+      else if(kneeAngle > t.kneeMax) statusMsg = 'Scendi di più: piega maggiormente le ginocchia.';
+      else statusMsg = 'Sei sceso troppo: risali leggermente.';
+
+      return {
+        ok,
+        statusMsg,
+        metrics: [{ value: Math.round(kneeAngle) + '°', ok }]
+      };
+    }
+  },
+
+  chairdip: {
+    label: 'Dip su sedia',
+    mode: 'reps',
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, seduto sul bordo di una sedia con le mani accanto ai fianchi: serve vedere il gomito.",
+    howto: [
+      'Mani sul bordo della sedia accanto ai fianchi, gambe distese in avanti.',
+      'Scendi piegando i gomiti fino a circa 90°, tenendo la schiena vicina alla sedia.',
+      'Spingi sulle mani per risalire fino a braccia quasi distese.'
+    ],
+    metricLabels: ['Gomito'],
+    muscles: { visual:['arms','shoulders'], text:['Tricipiti','Spalle','Petto (stabilizzazione)'] },
+    thresholds: { elbowMin: 70, elbowDownEnter: 130, elbowUpExit: 160 },
+    calib: {
+      steps: [
+        { prompt: "Braccia distese, seduto sul bordo della sedia, di lato alla fotocamera.",
+          sample(lm){ const s = pickSide(lm); return { elbow: angleBetween(s.shoulder, s.elbow, s.wrist) }; } },
+        { prompt: "Scendi fino alla profondità massima che consideri corretta e resta fermo.",
+          sample(lm){ const s = pickSide(lm); return { elbow: angleBetween(s.shoulder, s.elbow, s.wrist) }; } }
+      ],
+      apply(vals, t){
+        const extended = Math.max(vals[0].elbow, vals[1].elbow);
+        const bent = Math.min(vals[0].elbow, vals[1].elbow);
+        if(extended - bent < 20) return false;
+        t.elbowMin = Math.max(45, Math.round(bent - 10));
+        t.elbowDownEnter = Math.max(t.elbowMin + 15, Math.round((extended + bent) / 2));
+        t.elbowUpExit = Math.max(t.elbowDownEnter + 10, Math.round(extended - 8));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide(lm);
+      const elbowAngle = angleBetween(s.shoulder, s.elbow, s.wrist);
+      if(elbowAngle == null) return null;
+      const elbowOk = elbowAngle >= t.elbowMin;
+      const issues = [];
+      if(!elbowOk) issues.push('Sei sceso troppo: rischio sulla spalla, risali leggermente.');
+      const ok = issues.length === 0;
+
+      if(exState.phase === undefined){ exState.phase = 'up'; exState.repHadIssue = false; exState.issueSince = null; }
+      if(exState.phase === 'up' && elbowAngle < t.elbowDownEnter){
+        exState.phase = 'down';
+        exState.repHadIssue = false;
+        exState.issueSince = null;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'down'){
+        trackFormIssue(issues.length > 0, issues[0]);
+        if(elbowAngle > t.elbowUpExit){
+          exState.phase = 'up';
+          const tooFast = repTooFast(exState.phaseStart);
+          const invalidParts = tooFast ? 'Movimento troppo rapido o instabile: ripetizione non conteggiata.' : rejectRepSequence(exState.lastIssueMsg);
+          completeRep(exState.repHadIssue || tooFast, invalidParts, 'Dip controllato, buona profondità.');
+          exState.repHadIssue = false;
+          exState.issueSince = null;
+        }
+      }
+
+      return {
+        ok,
+        statusMsg: issues.length ? issues[0] : (elbowAngle > t.elbowUpExit ? 'Braccia estese' : 'Discesa — forma corretta'),
+        metrics: [{ value: Math.round(elbowAngle) + '°', ok: elbowOk }]
+      };
+    }
+  }
+};
+
+// --- persistenza soglie personalizzate ---
+const THRESH_STORAGE_KEY = 'formacheck_thresholds_v1';
+
+function loadSavedThresholds(){
+  try{
+    const raw = localStorage.getItem(THRESH_STORAGE_KEY);
+    if(!raw) return;
+    const saved = JSON.parse(raw);
+    Object.keys(saved).forEach(key => {
+      if(EXERCISES[key] && EXERCISES[key].thresholds && saved[key] && saved[key].thresholds){
+        Object.assign(EXERCISES[key].thresholds, saved[key].thresholds);
+      }
+    });
+  } catch(e){
+    // localStorage non disponibile (es. modalità privata) o dati corrotti: si prosegue con le soglie di default
+  }
+}
+
+function saveThresholds(key){
+  try{
+    const raw = localStorage.getItem(THRESH_STORAGE_KEY);
+    const saved = raw ? JSON.parse(raw) : {};
+    saved[key] = { thresholds: EXERCISES[key].thresholds, calibratedAt: new Date().toISOString() };
+    localStorage.setItem(THRESH_STORAGE_KEY, JSON.stringify(saved));
+  } catch(e){
+    // storage non disponibile: le soglie personalizzate restano valide solo per questa sessione
+  }
+}
+
+function getSavedMeta(key){
+  try{
+    const raw = localStorage.getItem(THRESH_STORAGE_KEY);
+    if(!raw) return null;
+    const saved = JSON.parse(raw);
+    return saved[key] || null;
+  } catch(e){ return null; }
+}
+
+// --- cronologia allenamenti ---
+const HISTORY_STORAGE_KEY = 'formacheck_history_v1';
+const HISTORY_MAX_ENTRIES = 500; // evita che lo storage cresca all'infinito
+
+function loadHistory(){
+  try{
+    const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e){ return []; }
+}
+
+function saveHistoryEntry(entry){
+  try{
+    const hist = loadHistory();
+    hist.push(entry);
+    const trimmed = hist.length > HISTORY_MAX_ENTRIES ? hist.slice(hist.length - HISTORY_MAX_ENTRIES) : hist;
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(trimmed));
+  } catch(e){
+    // storage non disponibile: la cronologia resta valida solo per questa sessione
+  }
+}
+
+function clearHistory(){
+  try{ localStorage.removeItem(HISTORY_STORAGE_KEY); } catch(e){ /* storage non disponibile */ }
+}
+
+// Salva nello storico l'attività dell'esercizio corrente, se ce n'è stata
+// (chiamare SEMPRE prima di azzerare repCount/invalidRepCount/timerSeconds).
+function logSessionIfActive(){
+  const ex = EXERCISES[currentExercise];
+  if(!ex) return;
+  const hasActivity = ex.mode === 'reps'
+    ? (repCount > 0 || invalidRepCount > 0)
+    : timerSeconds >= 3; // ignora tocchi accidentali brevissimi in modalità a timer
+  if(!hasActivity) return;
+  saveHistoryEntry({
+    ts: Date.now(),
+    key: currentExercise,
+    label: ex.label,
+    mode: ex.mode,
+    valid: repCount,
+    invalid: invalidRepCount,
+    seconds: Math.round(timerSeconds)
+  });
+}
+
+// Raggruppa la cronologia grezza per giorno+esercizio, così più sessioni
+// frammentate (es. per una ricalibrazione) risultano in un'unica riga.
+function aggregateHistory(){
+  const hist = loadHistory();
+  const map = new Map();
+  hist.forEach(e => {
+    const dateStr = new Date(e.ts).toLocaleDateString('it-IT');
+    const mapKey = dateStr + '|' + e.key;
+    if(!map.has(mapKey)){
+      map.set(mapKey, { dateStr, key: e.key, label: e.label, mode: e.mode, valid: 0, invalid: 0, seconds: 0, ts: e.ts });
+    }
+    const agg = map.get(mapKey);
+    agg.valid += e.valid || 0;
+    agg.invalid += e.invalid || 0;
+    agg.seconds += e.seconds || 0;
+    agg.ts = Math.max(agg.ts, e.ts);
+  });
+  return [...map.values()].sort((a, b) => b.ts - a.ts);
+}
+
+function updateThresholdCalibStatus(){
+  const ex = EXERCISES[currentExercise];
+  if(!ex.calib){
+    thresholdCalibBtn.style.display = 'none';
+    thresholdCalibStatus.style.display = 'none';
+    return;
+  }
+  thresholdCalibBtn.style.display = 'block';
+  thresholdCalibBtn.disabled = appState !== 'active';
+  const meta = getSavedMeta(currentExercise);
+  if(meta){
+    const d = new Date(meta.calibratedAt);
+    thresholdCalibStatus.style.display = 'block';
+    thresholdCalibStatus.textContent = '✓ Soglie personalizzate attive (calibrate il ' + d.toLocaleDateString('it-IT') + ')';
+  } else {
+    thresholdCalibStatus.style.display = 'none';
+  }
+}
+
+// --- wizard di taratura soglie personalizzate ---
+const THRESH_HOLD_MS = 2200;
+let threshCalib = null;
+
+function startThresholdCalibration(){
+  const ex = EXERCISES[currentExercise];
+  if(!ex.calib || appState !== 'active') return;
+  threshCalib = { stepIndex: 0, holdStart: null, stepSamples: [], results: [] };
+  appState = 'threshold-calibrating';
+  thresholdCalibOverlay.style.display = 'flex';
+  showThresholdCalibStep();
+}
+
+function showThresholdCalibStep(){
+  const ex = EXERCISES[currentExercise];
+  const step = ex.calib.steps[threshCalib.stepIndex];
+  thresholdCalibStepLabel.textContent = 'Taratura soglie — passo ' + (threshCalib.stepIndex + 1) + ' di ' + ex.calib.steps.length;
+  thresholdCalibPrompt.textContent = step.prompt;
+  thresholdCalibBar.style.width = '0%';
+  threshCalib.holdStart = null;
+  threshCalib.stepSamples = [];
+}
+
+function cancelThresholdCalibration(){
+  threshCalib = null;
+  thresholdCalibOverlay.style.display = 'none';
+  appState = 'active';
+  updateThresholdCalibStatus();
+}
+
+function finishThresholdCalibration(){
+  const ex = EXERCISES[currentExercise];
+  const avgs = threshCalib.results.map(samples => {
+    const keys = Object.keys(samples[0]);
+    const out = {};
+    keys.forEach(k => {
+      const vals = samples.map(s => s[k]).filter(v => typeof v === 'number' && !isNaN(v));
+      out[k] = vals.reduce((a, b) => a + b, 0) / vals.length;
+    });
+    return out;
+  });
+  const success = ex.calib.apply(avgs, ex.thresholds);
+  threshCalib = null;
+  thresholdCalibOverlay.style.display = 'none';
+  appState = 'active';
+  resetMetrics();
+  updateThresholdCalibStatus();
+  if(success === false){
+    pushFeedback('Calibrazione non riuscita: il movimento tra i due passi era troppo simile. Riprova assicurandoti di muoverti chiaramente tra le due posizioni.', false);
+  } else {
+    saveThresholds(currentExercise);
+    updateThresholdCalibStatus();
+    pushFeedback('Soglie personalizzate salvate per questo esercizio.', true);
+  }
+}
+
+thresholdCalibBtn.addEventListener('click', startThresholdCalibration);
+thresholdCalibCancel.addEventListener('click', cancelThresholdCalibration);
+
+// --- timer di riposo ---
+function playBeep(){
+  try{
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if(!AudioCtx) return;
+    const actx = new AudioCtx();
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.connect(gain);
+    gain.connect(actx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, actx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.3, actx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + 0.5);
+    osc.start();
+    osc.stop(actx.currentTime + 0.5);
+  } catch(e){ /* audio non disponibile in questo contesto */ }
+}
+
+function formatRestTime(sec){
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m > 0 ? (m + ':' + String(s).padStart(2, '0')) : String(s);
+}
+
+function startRestTimer(seconds, nextLabel, onComplete){
+  isResting = true;
+  restRemaining = seconds;
+  restOnComplete = onComplete;
+  restNextLabel.textContent = nextLabel || '';
+  restCountdown.textContent = formatRestTime(restRemaining);
+  restOverlay.style.display = 'flex';
+  clearInterval(restIntervalId);
+  restIntervalId = setInterval(() => {
+    restRemaining--;
+    restCountdown.textContent = formatRestTime(Math.max(0, restRemaining));
+    if(restRemaining <= 0){
+      clearInterval(restIntervalId);
+      completeRest();
+    }
+  }, 1000);
+}
+
+function completeRest(){
+  isResting = false;
+  restOverlay.style.display = 'none';
+  playBeep();
+  if(voiceEnabled) speak('Riposo terminato');
+  const cb = restOnComplete;
+  restOnComplete = null;
+  if(cb) cb();
+}
+
+function skipRestTimer(){
+  clearInterval(restIntervalId);
+  completeRest();
+}
+
+restSkipBtn.addEventListener('click', skipRestTimer);
+
+restBtn.addEventListener('click', () => {
+  if(appState !== 'active' || isResting) return;
+  startRestTimer(restDuration, '', () => {});
+});
+
+restPresetButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    restPresetButtons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    restDuration = parseInt(btn.dataset.rest, 10);
+  });
+});
+
+// --- modalità circuito ---
+function buildCircuitList(){
+  circuitListEl.innerHTML = '';
+  Object.keys(EXERCISES).forEach(key => {
+    const ex = EXERCISES[key];
+    const row = document.createElement('div');
+    row.className = 'circuit-row';
+    const defaultTarget = ex.mode === 'reps' ? 10 : 30;
+    row.innerHTML =
+      '<input type="checkbox" id="circ_' + key + '" data-key="' + key + '">' +
+      '<label for="circ_' + key + '">' + ex.label + '</label>' +
+      '<input type="number" min="1" value="' + defaultTarget + '" id="circtarget_' + key + '">' +
+      '<span class="unit">' + (ex.mode === 'reps' ? 'reps' : 'sec') + '</span>';
+    circuitListEl.appendChild(row);
+  });
+}
+
+function collectCircuitConfig(){
+  const list = [];
+  Object.keys(EXERCISES).forEach(key => {
+    const cb = document.getElementById('circ_' + key);
+    if(cb && cb.checked){
+      const targetInput = document.getElementById('circtarget_' + key);
+      const target = Math.max(1, parseInt(targetInput.value, 10) || (EXERCISES[key].mode === 'reps' ? 10 : 30));
+      list.push({ key, target });
+    }
+  });
+  return list;
+}
+
+modeSelect.querySelectorAll('.ex-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if(running) return; // la modalità si sceglie prima di avviare la fotocamera
+    modeSelect.querySelectorAll('.ex-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    appMode = btn.dataset.mode;
+    singleModeSection.style.display = appMode === 'single' ? 'block' : 'none';
+    circuitBuilder.style.display = appMode === 'circuit' ? 'block' : 'none';
+    startBtn.textContent = appMode === 'circuit' ? 'Avvia circuito' : 'Avvia fotocamera';
+  });
+});
+
+function showCircuitIntro(step, onDone){
+  const ex = EXERCISES[step.key];
+  const meta = VIEW_META[ex.view];
+  circuitIntroIcon.textContent = meta.icon;
+  circuitIntroLabel.textContent = ex.label + ' — vista ' + ex.view;
+  circuitIntroTarget.textContent = 'Obiettivo: ' + step.target + (ex.mode === 'reps' ? ' ripetizioni' : ' secondi');
+  circuitIntroOverlay.style.display = 'flex';
+  setTimeout(() => {
+    circuitIntroOverlay.style.display = 'none';
+    onDone();
+  }, 2200);
+}
+
+function runCircuitStep(){
+  if(circuitIndex >= circuitList.length){
+    finishCircuit();
+    return;
+  }
+  const step = circuitList[circuitIndex];
+  showCircuitIntro(step, () => {
+    selectExercise(step.key);
+    circuitProgressNote.style.display = 'block';
+    circuitProgressNote.textContent = 'Circuito — passo ' + (circuitIndex + 1) + ' di ' + circuitList.length + ': ' + EXERCISES[step.key].label;
+    enterCalibratingState();
+  });
+}
+
+function triggerCircuitAdvance(){
+  const step = circuitList[circuitIndex];
+  const ex = EXERCISES[step.key];
+  circuitResults.push({
+    key: step.key,
+    label: ex.label,
+    achieved: ex.mode === 'reps' ? repCount : Math.round(timerSeconds),
+    target: step.target,
+    unit: ex.mode === 'reps' ? 'reps' : 'sec',
+    invalid: invalidRepCount
+  });
+  circuitIndex++;
+  if(circuitIndex >= circuitList.length){
+    finishCircuit();
+  } else {
+    const nextEx = EXERCISES[circuitList[circuitIndex].key];
+    startRestTimer(restDuration, 'Prossimo: ' + nextEx.label, () => {
+      runCircuitStep();
+    });
+  }
+}
+
+function finishCircuit(){
+  resetMetrics(); // registra nello storico l'ultimo esercizio del circuito, appena concluso
+  circuitActive = false;
+  circuitProgressNote.style.display = 'none';
+  circuitCancelBtn.style.display = 'none';
+  circuitSummaryList.innerHTML = '';
+  circuitResults.forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'circuit-summary-row';
+    const invalidNote = r.invalid > 0 ? ' <span style="color:var(--ink-dim);">(' + r.invalid + ' scartate)</span>' : '';
+    row.innerHTML = '<span>' + r.label + '</span><span>' + r.achieved + ' / ' + r.target + ' ' + r.unit + invalidNote + '</span>';
+    circuitSummaryList.appendChild(row);
+  });
+  circuitSummaryOverlay.style.display = 'flex';
+  if(voiceEnabled) speak('Circuito completato, ottimo lavoro.');
+}
+
+function startCircuit(){
+  circuitList = collectCircuitConfig();
+  if(circuitList.length === 0){
+    pushFeedback('Seleziona almeno un esercizio per il circuito.', false);
+    appState = 'active';
+    return;
+  }
+  circuitIndex = 0;
+  circuitResults = [];
+  circuitActive = true;
+  circuitCancelBtn.style.display = 'block';
+  runCircuitStep();
+}
+
+function cancelCircuit(){
+  resetMetrics(); // registra nello storico l'esercizio interrotto a metà
+  circuitActive = false;
+  clearInterval(restIntervalId);
+  isResting = false;
+  restOverlay.style.display = 'none';
+  circuitIntroOverlay.style.display = 'none';
+  circuitProgressNote.style.display = 'none';
+  circuitCancelBtn.style.display = 'none';
+  enterCalibratingState();
+}
+
+circuitCancelBtn.addEventListener('click', cancelCircuit);
+circuitSummaryCloseBtn.addEventListener('click', () => {
+  circuitSummaryOverlay.style.display = 'none';
+});
+
+function buildExerciseButtons(){
+  exerciseSelect.innerHTML = '';
+  Object.keys(EXERCISES).forEach(key => {
+    const btn = document.createElement('button');
+    btn.className = 'ex-btn' + (key === currentExercise ? ' active' : '');
+    btn.dataset.ex = key;
+    btn.textContent = EXERCISES[key].label;
+    btn.addEventListener('click', () => selectExercise(key));
+    exerciseSelect.appendChild(btn);
+  });
+}
+
+function buildMetricRows(){
+  metricsContainer.innerHTML = '';
+  metricValueEls = [];
+  const ex = EXERCISES[currentExercise];
+  ex.metricLabels.forEach(label => {
+    const row = document.createElement('div');
+    row.className = 'metric-row';
+    const lab = document.createElement('div');
+    lab.className = 'metric-label';
+    lab.textContent = label;
+    const val = document.createElement('div');
+    val.className = 'metric-value';
+    val.textContent = '—';
+    row.appendChild(lab);
+    row.appendChild(val);
+    metricsContainer.appendChild(row);
+    metricValueEls.push(val);
+  });
+}
+
+function updateViewBadge(){
+  const ex = EXERCISES[currentExercise];
+  const meta = VIEW_META[ex.view];
+  viewIcon.textContent = meta.icon;
+  viewTitle.textContent = meta.title;
+  viewNote.textContent = ex.viewNote;
+  calibHint.textContent = ex.viewNote;
+}
+
+function updateMuscleDisplay(){
+  const ex = EXERCISES[currentExercise];
+  const regions = ex.muscles.visual;
+  muscleRegionEls.forEach(el => {
+    el.classList.toggle('active', regions.includes(el.dataset.region));
+  });
+  muscleLegend.innerHTML = '';
+  ex.muscles.text.forEach(name => {
+    const chip = document.createElement('div');
+    chip.className = 'muscle-chip';
+    chip.textContent = name;
+    muscleLegend.appendChild(chip);
+  });
+}
+
+function updateHowto(){
+  const ex = EXERCISES[currentExercise];
+  howtoList.innerHTML = '';
+  (ex.howto || []).forEach(step => {
+    const li = document.createElement('li');
+    li.textContent = step;
+    howtoList.appendChild(li);
+  });
+}
+
+howtoToggle.addEventListener('click', () => {
+  const isOpen = howtoList.hidden;
+  howtoList.hidden = !isOpen;
+  howtoToggle.setAttribute('aria-expanded', String(isOpen));
+});
+
+function selectExercise(key){
+  resetMetrics(); // registra/azzera le metriche dell'esercizio PRECEDENTE prima di cambiarlo
+  currentExercise = key;
+  document.querySelectorAll('.ex-btn').forEach(b => b.classList.toggle('active', b.dataset.ex === key));
+  buildMetricRows();
+  updateViewBadge();
+  updateMuscleDisplay();
+  updateHowto();
+  updateThresholdCalibStatus();
+  const ex = EXERCISES[key];
+  repCounter.style.display = ex.mode === 'reps' ? 'flex' : 'none';
+  timerCounter.style.display = ex.mode === 'timer' ? 'block' : 'none';
+  if(appState === 'active') enterCalibratingState();
+}
+
+function stopCameraStream(){
+  if(video.srcObject){
+    video.srcObject.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+  }
+}
+
+camButtons.forEach(btn => {
+  btn.addEventListener('click', async () => {
+    if(btn.classList.contains('active') || btn.disabled) return;
+    camButtons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    facingMode = btn.dataset.facing;
+    if(!running) return; // fotocamera non ancora avviata: la scelta si applica al prossimo avvio
+
+    // fotocamera già in esecuzione: cambiala subito, senza dover fermare tutto
+    camButtons.forEach(b => b.disabled = true);
+    setStatus(false, 'Cambio fotocamera…');
+    stopCameraStream();
+    lastVideoTime = -1;
+    const ok = await startCamera();
+    camButtons.forEach(b => b.disabled = false);
+    if(ok){
+      resetMetrics();
+      enterCalibratingState();
+    }
+  });
+});
+
+loadSavedThresholds();
+buildExerciseButtons();
+buildMetricRows();
+updateViewBadge();
+updateMuscleDisplay();
+updateHowto();
+updateThresholdCalibStatus();
+buildCircuitList();
+
+function resetMetrics(){
+  logSessionIfActive();
+  repCount = 0; repNum.textContent = '0';
+  invalidRepCount = 0;
+  sessionErrorTally = {};
+  timerSeconds = 0; timerNum.textContent = '0:00';
+  exState = {};
+  feedbackList.innerHTML = '';
+}
+
+function hasCurrentActivity(){
+  const ex = EXERCISES[currentExercise];
+  return ex.mode === 'reps' ? (repCount > 0 || invalidRepCount > 0) : timerSeconds >= 3;
+}
+
+resetBtn.addEventListener('click', () => {
+  if(hasCurrentActivity()) showSessionSummary(resetMetrics);
+  else resetMetrics();
+});
+
+// Riepilogo di fine sessione per un singolo esercizio: percentuale di
+// ripetizioni valide, errore più frequente, tempo totale. Va chiamato PRIMA
+// di azzerare le metriche (usa i valori correnti).
+function showSessionSummary(onClose){
+  const ex = EXERCISES[currentExercise];
+  sessionSummaryBody.innerHTML = '';
+
+  const addRow = (label, value) => {
+    const row = document.createElement('div');
+    row.className = 'circuit-summary-row';
+    row.innerHTML = '<span>' + label + '</span><span>' + value + '</span>';
+    sessionSummaryBody.appendChild(row);
+  };
+
+  addRow('Esercizio', ex.label);
+  if(ex.mode === 'reps'){
+    const total = repCount + invalidRepCount;
+    const accuracy = total > 0 ? Math.round((repCount / total) * 100) : null;
+    addRow('Ripetizioni valide', repCount);
+    addRow('Ripetizioni scartate', invalidRepCount);
+    if(accuracy != null) addRow('Precisione', accuracy + '%');
+  } else {
+    addRow('Tempo in tenuta corretta', formatRestTime(Math.round(timerSeconds)));
+  }
+  const topError = topErrorReason();
+  if(topError) addRow('Errore più frequente', topError);
+
+  sessionSummaryOverlay.style.display = 'flex';
+  sessionSummaryCloseBtn.onclick = () => {
+    sessionSummaryOverlay.style.display = 'none';
+    onClose();
+  };
+}
+
+// --- cronologia allenamenti (vista) ---
+function renderHistory(){
+  const rows = aggregateHistory();
+  historyList.innerHTML = '';
+  if(rows.length === 0){
+    const empty = document.createElement('div');
+    empty.className = 'calib-hint';
+    empty.textContent = 'Nessun allenamento registrato ancora.';
+    historyList.appendChild(empty);
+    return;
+  }
+  rows.forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'circuit-summary-row';
+    const total = r.valid + r.invalid;
+    const accuracy = total > 0 ? Math.round((r.valid / total) * 100) : null;
+    const detail = r.mode === 'reps'
+      ? r.valid + ' valide' + (r.invalid > 0 ? ' / ' + r.invalid + ' scartate' : '') + (accuracy != null ? ' (' + accuracy + '%)' : '')
+      : formatRestTime(r.seconds) + ' in tenuta corretta';
+    row.innerHTML = '<span>' + r.dateStr + ' — ' + r.label + '</span><span>' + detail + '</span>';
+    historyList.appendChild(row);
+  });
+}
+
+historyBtn.addEventListener('click', () => {
+  renderHistory();
+  historyOverlay.style.display = 'flex';
+});
+historyCloseBtn.addEventListener('click', () => {
+  historyOverlay.style.display = 'none';
+});
+historyClearBtn.addEventListener('click', () => {
+  clearHistory();
+  renderHistory();
+});
+
+function pushFeedback(msg, ok){
+  pushFeedbackSequence([msg], ok);
+}
+
+// Come pushFeedback, ma per un verdetto costruito da più frasi consequenziali
+// (es. "non corretto" → "non conteggiata" → come correggere): nella lista
+// feedback appare come un'unica riga leggibile, ma vocalmente ogni frase
+// viene accodata e pronunciata per intero prima della successiva.
+function pushFeedbackSequence(parts, ok){
+  const clean = parts.filter(Boolean);
+  if(clean.length === 0) return;
+  const div = document.createElement('div');
+  div.className = 'fb-item ' + (ok ? 'ok' : 'bad');
+  div.textContent = clean.join(' ');
+  feedbackList.prepend(div);
+  while(feedbackList.children.length > 8) feedbackList.removeChild(feedbackList.lastChild);
+  clean.forEach(p => speak(p));
+}
+
+// --- geometry helpers ---
+function angleBetween(a, b, c){
+  // angle at point b, formed by a-b-c, in degrees
+  const ab = { x: a.x - b.x, y: a.y - b.y };
+  const cb = { x: c.x - b.x, y: c.y - b.y };
+  const dot = ab.x*cb.x + ab.y*cb.y;
+  const magAB = Math.hypot(ab.x, ab.y);
+  const magCB = Math.hypot(cb.x, cb.y);
+  if(magAB === 0 || magCB === 0) return null;
+  let cos = dot / (magAB * magCB);
+  cos = Math.min(1, Math.max(-1, cos));
+  return Math.acos(cos) * 180 / Math.PI;
+}
+
+function angleFromVertical(top, bottom){
+  const dx = top.x - bottom.x;
+  const dy = top.y - bottom.y;
+  const angleRad = Math.atan2(Math.abs(dx), Math.abs(dy));
+  return angleRad * 180 / Math.PI;
+}
+
+// pick the side (left/right) with better visibility
+function pickSide(lm){
+  const L = { shoulder: lm[11], hip: lm[23], knee: lm[25], ankle: lm[27], elbow: lm[13], wrist: lm[15], toe: lm[31] };
+  const R = { shoulder: lm[12], hip: lm[24], knee: lm[26], ankle: lm[28], elbow: lm[14], wrist: lm[16], toe: lm[32] };
+  const visSum = s => (s.shoulder.visibility||0)+(s.hip.visibility||0)+(s.knee.visibility||0)+(s.ankle.visibility||0);
+  return visSum(L) >= visSum(R) ? L : R;
+}
+
+// quanto il ginocchio supera la punta del piede lungo la direzione caviglia→punta (in unità di lunghezza del piede)
+function kneeOverToeRatio(ankle, knee, toe){
+  if(!ankle || !knee || !toe) return null;
+  const footVec = { x: toe.x - ankle.x, y: toe.y - ankle.y };
+  const footLen = Math.hypot(footVec.x, footVec.y);
+  if(footLen < 0.01) return null;
+  const dir = { x: footVec.x / footLen, y: footVec.y / footLen };
+  const kneeVec = { x: knee.x - ankle.x, y: knee.y - ankle.y };
+  const projection = kneeVec.x * dir.x + kneeVec.y * dir.y;
+  return projection / footLen;
+}
+
+// vera vista laterale attesa: spalle "compresse" in larghezza nell'immagine rispetto alla lunghezza della gamba.
+// se il busto ruota verso la fotocamera, la larghezza spalle cresce e i calcoli 2D diventano inaffidabili.
+function isLateralViewReliable(lm){
+  const ls = lm[11], rs = lm[12], hip = lm[23], ankle = lm[27];
+  if(!ls || !rs || !hip || !ankle) return true;
+  const shoulderSep = Math.hypot(ls.x - rs.x, ls.y - rs.y);
+  const legLen = Math.hypot(hip.x - ankle.x, hip.y - ankle.y) || 0.01;
+  return (shoulderSep / legLen) < 0.55;
+}
+
+
+
+
+
+// --- calibrazione ---
+const CALIB_CHECKS = [
+  { key:'shoulder', label:'Spalla visibile', idx:[11,12] },
+  { key:'hip', label:'Anca visibile', idx:[23,24] },
+  { key:'knee', label:'Ginocchio visibile', idx:[25,26] },
+  { key:'ankle', label:'Caviglia visibile', idx:[27,28] },
+  { key:'framing', label:'Persona inquadrata per intero', idx:null }
+];
+
+function renderCalibChecklist(states){
+  calibChecklist.innerHTML = '';
+  CALIB_CHECKS.forEach(c => {
+    const div = document.createElement('div');
+    div.className = 'calib-item' + (states[c.key] ? ' pass' : '');
+    div.innerHTML = '<span class="dot"></span>' + c.label;
+    calibChecklist.appendChild(div);
+  });
+}
+
+function checkCalibration(lm){
+  const states = {};
+  const s = pickSide(lm);
+  states.shoulder = (s.shoulder.visibility||0) > 0.6;
+  states.hip = (s.hip.visibility||0) > 0.6;
+  states.knee = (s.knee.visibility||0) > 0.6;
+  states.ankle = (s.ankle.visibility||0) > 0.6;
+
+  // framing: bounding box of core landmarks should occupy a healthy vertical portion of the frame
+  const ys = [s.shoulder, s.hip, s.knee, s.ankle].map(p => p.y);
+  const spanY = Math.max(...ys) - Math.min(...ys);
+  states.framing = spanY > 0.35 && spanY < 0.98;
+
+  const allPass = Object.values(states).every(Boolean);
+  return { states, allPass };
+}
+
+function drawSkeleton(lm, ok){
+  const w = canvas.width, h = canvas.height;
+  const color = ok ? '#3ddc84' : '#ff5c5c';
+  const connections = [
+    [11,12],[11,23],[12,24],[23,24],
+    [11,13],[13,15],[12,14],[14,16],
+    [23,25],[25,27],[24,26],[26,28],
+    [27,31],[28,32]
+  ];
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = color;
+  connections.forEach(([a,b]) => {
+    const pa = lm[a], pb = lm[b];
+    if(!pa || !pb) return;
+    ctx.beginPath();
+    ctx.moveTo(pa.x*w, pa.y*h);
+    ctx.lineTo(pb.x*w, pb.y*h);
+    ctx.stroke();
+  });
+  ctx.fillStyle = color;
+  [11,12,13,14,15,16,23,24,25,26,27,28].forEach(i => {
+    const p = lm[i];
+    if(!p) return;
+    ctx.beginPath();
+    ctx.arc(p.x*w, p.y*h, 5, 0, Math.PI*2);
+    ctx.fill();
+  });
+}
+
+function setStatus(ok, msg){
+  statusDot.className = 'status-dot ' + (ok ? 'ok' : 'bad');
+  statusText.textContent = msg;
+}
+
+function renderLoop(){
+  if(!running) return;
+  requestAnimationFrame(renderLoop);
+
+  if(video.readyState < 2) return;
+  if(video.currentTime === lastVideoTime) return;
+  lastVideoTime = video.currentTime;
+
+  const now = performance.now();
+  const dt = now - lastFrameTime;
+  lastFrameTime = now;
+  fpsSmooth = fpsSmooth ? (fpsSmooth*0.9 + (1000/dt)*0.1) : (1000/dt);
+  fpsBadge.textContent = Math.round(fpsSmooth) + ' fps';
+
+  const result = poseLandmarker.detectForVideo(video, now);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  const hasPerson = result.landmarks && result.landmarks.length > 0;
+  const lm = hasPerson ? result.landmarks[0] : null;
+
+  if(isResting) return; // durante il riposo non valutiamo l'esercizio, la fotocamera resta solo in anteprima
+
+  if(appState === 'calibrating'){
+    if(hasPerson){
+      const { states, allPass } = checkCalibration(lm);
+      drawSkeleton(lm, allPass);
+      renderCalibChecklist(states);
+      if(allPass){
+        if(calibStableSince == null) calibStableSince = now;
+        const elapsed = now - calibStableSince;
+        calibBar.style.width = Math.min(100, (elapsed/CALIB_STABLE_MS)*100) + '%';
+        if(elapsed >= CALIB_STABLE_MS){
+          enterActiveState();
+        }
+      } else {
+        calibStableSince = null;
+        calibBar.style.width = '0%';
+      }
+    } else {
+      calibStableSince = null;
+      calibBar.style.width = '0%';
+      renderCalibChecklist({});
+    }
+    return;
+  }
+
+  if(appState === 'threshold-calibrating'){
+    const ex = EXERCISES[currentExercise];
+    const step = ex.calib.steps[threshCalib.stepIndex];
+    if(hasPerson){
+      const sample = step.sample(lm);
+      const valid = sample && Object.values(sample).every(v => typeof v === 'number' && !isNaN(v));
+      drawSkeleton(lm, valid);
+      if(valid){
+        threshCalib.stepSamples.push(sample);
+        if(threshCalib.holdStart == null) threshCalib.holdStart = now;
+        const elapsed = now - threshCalib.holdStart;
+        thresholdCalibBar.style.width = Math.min(100, (elapsed/THRESH_HOLD_MS)*100) + '%';
+        if(elapsed >= THRESH_HOLD_MS){
+          threshCalib.results.push(threshCalib.stepSamples);
+          threshCalib.stepIndex++;
+          if(threshCalib.stepIndex >= ex.calib.steps.length){
+            finishThresholdCalibration();
+          } else {
+            showThresholdCalibStep();
+          }
+        }
+      } else {
+        threshCalib.holdStart = null;
+        threshCalib.stepSamples = [];
+        thresholdCalibBar.style.width = '0%';
+      }
+    } else {
+      threshCalib.holdStart = null;
+      threshCalib.stepSamples = [];
+      thresholdCalibBar.style.width = '0%';
+    }
+    return;
+  }
+
+  // appState === 'active'
+  if(hasPerson){
+    const ex = EXERCISES[currentExercise];
+
+    // Se la persona non è inquadrata per intero (parte del corpo fuori campo,
+    // troppo vicina/lontana, articolazioni poco visibili), gli angoli calcolati
+    // dal modello diventano inaffidabili e possono generare ripetizioni false
+    // anche restando fermi: niente valutazione finché l'inquadratura non torna valida.
+    const framingCheck = checkCalibration(lm);
+    if(!framingCheck.allPass){
+      drawSkeleton(lm, false);
+      const failedCheck = CALIB_CHECKS.find(c => !framingCheck.states[c.key]);
+      setStatus(false, 'Inquadratura non valida' + (failedCheck ? ' — manca: ' + failedCheck.label.toLowerCase() : '') + '. Correggi la posizione.');
+      lastTimerTick = performance.now();
+      if(framingBadSince == null){
+        framingBadSince = performance.now();
+      } else if(performance.now() - framingBadSince > FRAMING_GRACE_MS){
+        framingBadSince = null;
+        enterCalibratingState(); // l'inquadratura resta scorretta troppo a lungo: richiede una nuova calibrazione
+      }
+      return;
+    }
+    framingBadSince = null;
+
+    if(ex.view === 'laterale' && !isLateralViewReliable(lm)){
+      drawSkeleton(lm, false);
+      setStatus(false, 'Ti sei girato verso la fotocamera: rimani di lato per una lettura affidabile.');
+      lastTimerTick = performance.now();
+      return;
+    }
+
+    const evalResult = ex.evaluate(lm);
+
+    if(evalResult){
+      drawSkeleton(lm, evalResult.ok);
+      setStatus(evalResult.ok, evalResult.statusMsg);
+
+      evalResult.metrics.forEach((m, i) => {
+        const el = metricValueEls[i];
+        if(!el) return;
+        el.textContent = m.value;
+        el.className = 'metric-value' + (m.ok === true ? ' ok' : m.ok === false ? ' bad' : '');
+      });
+
+      if(ex.mode === 'timer' && evalResult.ok){
+        const tickNow = performance.now();
+        timerSeconds += (tickNow - lastTimerTick)/1000;
+        lastTimerTick = tickNow;
+        const mm = Math.floor(timerSeconds/60);
+        const ss = Math.floor(timerSeconds%60).toString().padStart(2,'0');
+        timerNum.textContent = mm + ':' + ss;
+        if(circuitActive && !isResting && timerSeconds >= circuitList[circuitIndex].target){
+          triggerCircuitAdvance();
+        }
+      } else {
+        lastTimerTick = performance.now();
+      }
+    }
+  } else {
+    setStatus(false, 'Nessuna persona rilevata — posizionati nell\'inquadratura');
+    lastTimerTick = performance.now();
+    if(framingBadSince == null){
+      framingBadSince = performance.now();
+    } else if(performance.now() - framingBadSince > FRAMING_GRACE_MS){
+      framingBadSince = null;
+      enterCalibratingState();
+    }
+  }
+}
+
+function enterActiveState(){
+  appState = 'active';
+  calibOverlay.style.display = 'none';
+  recalibBtn.style.display = 'block';
+  resetMetrics();
+  lastTimerTick = performance.now();
+  framingBadSince = null;
+  setStatus(true, 'Rilevamento attivo');
+  updateThresholdCalibStatus();
+}
+
+function enterCalibratingState(){
+  appState = 'calibrating';
+  calibStableSince = null;
+  calibBar.style.width = '0%';
+  calibOverlay.style.display = 'flex';
+  recalibBtn.style.display = 'none';
+  renderCalibChecklist({});
+  updateThresholdCalibStatus();
+}
+
+async function initPose(){
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO",
+    numPoses: 1
+  });
+}
+
+async function startCamera(){
+  const constraintsPreferred = {
+    video: { facingMode: { exact: facingMode }, width: { ideal: 640 }, height: { ideal: 480 } },
+    audio: false
+  };
+  const constraintsFallback = {
+    video: { facingMode: facingMode, width: { ideal: 640 }, height: { ideal: 480 } },
+    audio: false
+  };
+  try{
+    let stream;
+    try{
+      stream = await navigator.mediaDevices.getUserMedia(constraintsPreferred);
+    } catch(e){
+      // exact non supportato (es. desktop senza fotocamera posteriore): riprova senza "exact"
+      stream = await navigator.mediaDevices.getUserMedia(constraintsFallback);
+    }
+    video.srcObject = stream;
+    await new Promise(res => video.onloadedmetadata = res);
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    // specchia solo la fotocamera frontale (selfie), non quella posteriore
+    const mirrored = facingMode === 'user';
+    video.classList.toggle('mirrored', mirrored);
+    canvas.classList.toggle('mirrored', mirrored);
+    return true;
+  } catch(err){
+    setStatus(false, 'Accesso fotocamera negato o non disponibile: ' + err.message);
+    return false;
+  }
+}
+
+startBtn.addEventListener('click', async () => {
+  startBtn.disabled = true;
+  startBtn.textContent = 'Avvio…';
+  camButtons.forEach(b => b.disabled = true);
+  setStatus(false, 'Richiesta accesso fotocamera…');
+  loadingOverlay.style.display = 'flex';
+
+  const camOk = await startCamera();
+  camButtons.forEach(b => b.disabled = false); // resta possibile cambiare fotocamera anche a fotocamera avviata
+  if(!camOk){
+    startBtn.disabled = false;
+    startBtn.textContent = 'Riprova';
+    loadingOverlay.style.display = 'none';
+    return;
+  }
+
+  if(!poseLandmarker){
+    await initPose();
+  }
+  loadingOverlay.style.display = 'none';
+  running = true;
+  resetBtn.disabled = false;
+  startBtn.textContent = 'In esecuzione';
+  startBtn.disabled = true;
+  renderLoop();
+
+  if(appMode === 'circuit'){
+    startCircuit();
+  } else {
+    repCounter.style.display = EXERCISES[currentExercise].mode === 'reps' ? 'flex' : 'none';
+    timerCounter.style.display = EXERCISES[currentExercise].mode === 'timer' ? 'block' : 'none';
+    updateViewBadge();
+    enterCalibratingState();
+  }
+});
+
+calibSkip.addEventListener('click', () => {
+  enterActiveState();
+});
+
+recalibBtn.addEventListener('click', () => {
+  enterCalibratingState();
+});
+
+expandBtn.addEventListener('click', () => {
+  const isExpanded = stageEl.classList.toggle('expanded');
+  document.body.classList.toggle('stage-locked', isExpanded);
+  expandBtn.textContent = isExpanded ? '✕' : '⤢';
+  expandBtn.title = isExpanded ? 'Riduci' : "Ingrandisci l'inquadratura";
+});
+</script>
+</body>
+</html>
