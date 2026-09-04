@@ -977,8 +977,7 @@ themeToggleBtn.addEventListener('click', () => {
   saveTheme(currentTheme);
 });
 
-// --- guida introduttiva al primo avvio ---
-const ONBOARDING_STORAGE_KEY = 'formacheck_onboarded_v1';
+// --- guida introduttiva: ricompare a ogni apertura dell'app, sempre saltabile ---
 const ONBOARDING_STEPS = [
   { title: 'Benvenuto in FormaCheck 👋', text: 'Ti aiuta a correggere la forma dei tuoi esercizi a corpo libero in tempo reale, usando solo la fotocamera del telefono.' },
   { title: 'Scegli un esercizio', text: 'Seleziona un esercizio dalla lista (o crea un circuito), poi tocca "Avvia fotocamera". Trovi i passaggi di ogni esercizio in "Come si esegue".' },
@@ -987,13 +986,6 @@ const ONBOARDING_STEPS = [
   { title: 'Cronologia, obiettivi e record', text: 'Nel pulsante "Cronologia allenamenti" trovi i tuoi progressi nel tempo, la serie di giorni consecutivi e i tuoi record personali.' }
 ];
 let onboardingStep = 0;
-
-function loadOnboarded(){
-  try{ return localStorage.getItem(ONBOARDING_STORAGE_KEY) === '1'; } catch(e){ return true; }
-}
-function markOnboarded(){
-  try{ localStorage.setItem(ONBOARDING_STORAGE_KEY, '1'); } catch(e){ /* storage non disponibile */ }
-}
 
 function renderOnboardingStep(){
   const step = ONBOARDING_STEPS[onboardingStep];
@@ -1016,7 +1008,6 @@ function showOnboarding(){
 }
 function closeOnboarding(){
   onboardingOverlay.style.display = 'none';
-  markOnboarded();
 }
 
 onboardingNextBtn.addEventListener('click', () => {
@@ -1032,7 +1023,7 @@ onboardingBackBtn.addEventListener('click', () => {
 onboardingSkipBtn.addEventListener('click', closeOnboarding);
 reopenOnboardingBtn.addEventListener('click', showOnboarding);
 
-if(!loadOnboarded()) showOnboarding();
+showOnboarding();
 
 let appMode = 'single'; // single | circuit
 let restDuration = 60;
@@ -3433,6 +3424,7 @@ async function startCamera(){
 }
 
 startBtn.addEventListener('click', async () => {
+  if(onboardingOverlay.style.display !== 'none') closeOnboarding(); // avviare la fotocamera chiude subito la guida, se ancora aperta
   startBtn.disabled = true;
   startBtn.textContent = 'Avvio…';
   camButtons.forEach(b => b.disabled = true);
