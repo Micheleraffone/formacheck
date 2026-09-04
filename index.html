@@ -824,10 +824,22 @@
       <div class="rep-label">tempo in tenuta corretta</div>
     </div>
 
-    <div id="repGoalRow" style="display:none; align-items:center; justify-content:center; gap:8px; font-size:11.5px; color:var(--ink-dim); padding-bottom:4px;">
+    <div id="repGoalRow" style="display:none; align-items:center; justify-content:center; gap:8px; font-size:11.5px; color:var(--ink-dim); padding-bottom:4px; flex-wrap:wrap;">
       <span>Traguardo</span>
       <input type="number" id="repGoalInput" min="1" value="10" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'IBM Plex Mono', monospace;">
       <span id="repGoalUnit">ripetizioni</span>
+      <span style="opacity:.5;">·</span>
+      <span id="setsGoalUnit">serie</span>
+      <input type="number" id="setsGoalInput" min="1" value="1" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'IBM Plex Mono', monospace;">
+    </div>
+    <div class="calib-status-note" id="setBadge" style="display:none; text-align:center;"></div>
+    <div id="singleRestPresetWrap" style="display:none;">
+      <div class="section-label">Riposo tra le serie</div>
+      <div class="cam-select" id="singleRestPresetSelect">
+        <button class="cam-btn restpreset-btn" data-rest="30">30s</button>
+        <button class="cam-btn restpreset-btn active" data-rest="60">60s</button>
+        <button class="cam-btn restpreset-btn" data-rest="90">90s</button>
+      </div>
     </div>
 
     <div>
@@ -932,6 +944,9 @@ const historyCloseBtn = document.getElementById('historyCloseBtn');
 const repGoalRow = document.getElementById('repGoalRow');
 const repGoalInput = document.getElementById('repGoalInput');
 const repGoalUnit = document.getElementById('repGoalUnit');
+const setsGoalInput = document.getElementById('setsGoalInput');
+const setBadge = document.getElementById('setBadge');
+const singleRestPresetWrap = document.getElementById('singleRestPresetWrap');
 
 // Piccole icone SVG in stile lineare (coerenti con l'estetica tecnica
 // dell'app), al posto delle emoji nei controlli principali.
@@ -1083,6 +1098,10 @@ let invalidRepCount = 0; // ripetizioni scartate nella sessione corrente (forma 
 let sessionErrorTally = {}; // motivo di scarto -> quante volte è successo nella sessione corrente
 let repGoal = 10; // traguardo ripetizioni in modalità singolo esercizio (solo esercizi a ripetizioni)
 let timerGoalSeconds = 30; // idem per gli esercizi a timer
+let setsGoal = 1; // quante serie fare dello stesso esercizio, in modalità singolo esercizio
+let currentSet = 1; // serie in corso
+let setBaseline = 0; // repCount (o timerSeconds) all'inizio della serie corrente: il traguardo di ogni
+                      // serie si misura da qui, non dal totale cumulato dall'inizio dell'esercizio
 let timerSeconds = 0;
 let lastFrameTime = performance.now();
 let fpsSmooth = 0;
@@ -1103,13 +1122,35 @@ function incrementRep(){
   void repNum.offsetWidth; // forza il reflow: riavvia l'animazione anche su incrementi consecutivi
   repNum.classList.add('pulse');
   if(voiceEnabled) speak(String(repCount));
-  if(!circuitActive && EXERCISES[currentExercise].mode === 'reps' && repCount === repGoal && !exState.goalCelebrated){
+  if(!circuitActive && EXERCISES[currentExercise].mode === 'reps' && (repCount - setBaseline) === repGoal && !exState.goalCelebrated){
     exState.goalCelebrated = true;
-    pushFeedback('🎯 Traguardo raggiunto: ' + repGoal + ' ripetizioni!', true);
+    handleGoalReached(repGoal + ' ripetizioni');
   }
   if(circuitActive && !isResting && repCount >= circuitList[circuitIndex].target){
     triggerCircuitAdvance();
   }
+}
+
+// Traguardo di una serie raggiunto, in modalità singolo esercizio (fuori dal
+// circuito, che gestisce da sé il passaggio tra un esercizio e l'altro).
+// Se è l'ultima serie prevista, si limita al messaggio di traguardo come
+// sempre; altrimenti avvisa, avvia il riposo tra le serie e — al termine —
+// fa ripartire pulita la macchina a stati della serie successiva, SENZA
+// azzerare il conteggio totale (resta cumulativo su tutte le serie) e senza
+// richiedere una nuova calibrazione (stesso esercizio, stessa posizione).
+function handleGoalReached(achievedLabel){
+  if(currentSet >= setsGoal){
+    pushFeedback('🎯 Traguardo raggiunto: ' + achievedLabel + '!', true);
+    return;
+  }
+  pushFeedback('🎯 Serie ' + currentSet + ' di ' + setsGoal + ' completata: ' + achievedLabel + '.', true);
+  const ex = EXERCISES[currentExercise];
+  setBaseline = ex.mode === 'reps' ? repCount : timerSeconds;
+  currentSet++;
+  updateSetBadge();
+  startRestTimer(restDuration, 'Serie ' + currentSet + ' di ' + setsGoal, () => {
+    exState = {}; // fa ripartire pulita la fase/i contatori interni della prossima serie
+  });
 }
 
 // Chiude una ripetizione: la conta solo se non ci sono stati errori di forma
@@ -1208,6 +1249,15 @@ let speechBusy = false;
 // collector prima che la sintesi finisca di pronunciarla, interrompendo
 // l'audio in silenzio.
 let livingUtterances = [];
+// Rete di sicurezza contro il bug più comune del vocale su mobile: se lo
+// schermo si blocca, arriva una notifica o l'app va in background mentre
+// sta parlando, il sistema interrompe la sintesi SENZA mai emettere onend —
+// e la coda, credendosi ancora occupata, resterebbe bloccata per sempre.
+// speechWatchdog forza comunque l'avanzamento dopo un tempo stimato sulla
+// lunghezza del testo; forceFinishSpeech permette di sbloccarla anche dal
+// listener "torno in primo piano" più sotto.
+let speechWatchdog = null;
+let forceFinishSpeech = null;
 
 // Evita di accodare la stessa identica frase più volte a distanza ravvicinata:
 // alcuni avvisi vengono ripetuti a caso per più fotogrammi di seguito finché
@@ -1247,16 +1297,31 @@ function pumpSpeechQueue(){
   if(voice) utter.voice = voice;
   utter.rate = 1.05;
 
+  let settled = false; // evita doppie esecuzioni se sia il watchdog sia un evento tardivo (onend) scattano entrambi
   const finishAndAdvance = () => {
+    if(settled) return;
+    settled = true;
+    if(speechWatchdog){ clearTimeout(speechWatchdog); speechWatchdog = null; }
+    forceFinishSpeech = null;
     speechBusy = false;
     livingUtterances = livingUtterances.filter(u => u !== utter);
-    pumpSpeechQueue(); // solo ora, a frase davvero conclusa, si passa alla prossima in coda
+    pumpSpeechQueue(); // solo ora, a frase davvero conclusa (o forzata), si passa alla prossima in coda
   };
   utter.onerror = (e) => { console.warn('Sintesi vocale non riuscita:', e.error); finishAndAdvance(); };
   utter.onend = finishAndAdvance;
+  forceFinishSpeech = finishAndAdvance;
 
   livingUtterances.push(utter);
   speechBusy = true;
+  // Se entro questo tempo (stimato sulla lunghezza del testo, con ampio
+  // margine) non arriva nessuna conferma di fine, si sblocca comunque la
+  // coda: meglio saltare una frase che restare mute per il resto della sessione.
+  const estimatedMs = 1500 + text.length * 90;
+  speechWatchdog = setTimeout(() => {
+    console.warn('Sintesi vocale: nessuna conferma di fine entro il tempo previsto, sblocco la coda.');
+    try{ synth.cancel(); } catch(e){ /* sintesi non disponibile */ }
+    finishAndAdvance();
+  }, estimatedMs);
   try{
     if(synth.paused) synth.resume();
     synth.speak(utter); // nessun cancel() prima: qui la coda è sempre vuota (o è la primissima chiamata,
@@ -1274,7 +1339,23 @@ function clearSpeechQueue(){
   speechQueue = [];
   speechBusy = false;
   livingUtterances = [];
+  if(speechWatchdog){ clearTimeout(speechWatchdog); speechWatchdog = null; }
+  forceFinishSpeech = null;
   try{ window.speechSynthesis.cancel(); } catch(e){ /* sintesi non disponibile */ }
+}
+
+// Seconda rete di sicurezza, complementare al watchdog: quando l'app torna
+// in primo piano (schermo sbloccato, si torna da un'altra app), se la coda
+// risulta ancora "occupata" ma la sintesi vera non sta parlando, la sblocca
+// subito invece di aspettare il timeout del watchdog.
+if(speechSupported){
+  document.addEventListener('visibilitychange', () => {
+    if(document.hidden) return;
+    if(speechBusy && !window.speechSynthesis.speaking && forceFinishSpeech){
+      forceFinishSpeech();
+    }
+    try{ window.speechSynthesis.resume(); } catch(e){ /* sintesi non disponibile */ }
+  });
 }
 
 function updateVoiceBtn(){
@@ -1772,8 +1853,22 @@ const EXERCISES = {
       const feetApart = spreadRatio > 1.6;
       const feetTogether = spreadRatio < 1.15;
 
+      // Asimmetria di ampiezza tra le due braccia: quanto ciascun polso si
+      // alza sopra la propria spalla, normalizzato sulla distanza tra le
+      // spalle (così la soglia resta valida sia vicino sia lontano dalla
+      // fotocamera). A differenza di armsAsym (un braccio giù, l'altro su),
+      // qui entrambi sono "su" ma non alla stessa altezza.
+      const shoulderWidth = Math.abs(lSh.x - rSh.x) || 0.01;
+      const leftArmRaise = (lSh.y - lWr.y) / shoulderWidth;
+      const rightArmRaise = (rSh.y - rWr.y) / shoulderWidth;
+      const armHeightAsym = armsUp && Math.abs(leftArmRaise - rightArmRaise) > 0.35;
+
       const issues = [];
       if(armsAsym) issues.push('Muovi entrambe le braccia insieme, in modo simmetrico.');
+      else if(armHeightAsym){
+        const weakerArm = leftArmRaise < rightArmRaise ? 'sinistro' : 'destro';
+        issues.push('Il braccio ' + weakerArm + ' si alza meno dell\'altro: apri le braccia alla stessa altezza.');
+      }
       if(armsUp && !feetApart) issues.push('Apri di più le gambe quando alzi le braccia.');
       const ok = issues.length === 0;
 
@@ -2067,8 +2162,22 @@ const EXERCISES = {
       const handsTooHigh = avgWristY < avgShoulderY - 0.05;
       const ok = !handsTooHigh;
 
-      if(exState.last === undefined){ exState.last = 'centro'; exState.lastSwitchAt = null; }
+      if(exState.last === undefined){
+        exState.last = 'centro'; exState.lastSwitchAt = null;
+        // Ampiezza massima di rotazione raggiunta verso ciascun lato prima
+        // del cambio: media separata per capire se un lato gira sempre meno
+        // dell'altro nel corso della serie.
+        exState.peakOffset = 0;
+        exState.leftSum = 0; exState.leftCount = 0;
+        exState.rightSum = 0; exState.rightCount = 0;
+        exState.asymWarnedAt = 0;
+      }
+      if(Math.abs(offset) > exState.peakOffset) exState.peakOffset = Math.abs(offset);
       if((side === 'destra' || side === 'sinistra') && side !== exState.last){
+        const finishedSide = exState.last; // il lato appena lasciato è quello di cui registriamo l'ampiezza raggiunta
+        if(finishedSide === 'sinistra'){ exState.leftSum += exState.peakOffset; exState.leftCount++; }
+        else if(finishedSide === 'destra'){ exState.rightSum += exState.peakOffset; exState.rightCount++; }
+        exState.peakOffset = Math.abs(offset);
         exState.last = side;
         const tooFast = repTooFast(exState.lastSwitchAt);
         exState.lastSwitchAt = performance.now();
@@ -2076,6 +2185,19 @@ const EXERCISES = {
           ? 'Movimento troppo rapido o instabile: torsione non conteggiata.'
           : rejectRepSequence('Tieni le mani più basse, vicino all\'addome.');
         completeRep(tooFast || handsTooHigh, invalidParts);
+
+        const totalReps = exState.leftCount + exState.rightCount;
+        if(exState.leftCount >= 3 && exState.rightCount >= 3 && totalReps - exState.asymWarnedAt >= 6){
+          const leftAvg = exState.leftSum / exState.leftCount;
+          const rightAvg = exState.rightSum / exState.rightCount;
+          const stronger = Math.max(leftAvg, rightAvg);
+          const weaker = Math.min(leftAvg, rightAvg);
+          if(stronger > 0.3 && weaker / stronger < 0.65){
+            exState.asymWarnedAt = totalReps;
+            const weakerSide = leftAvg < rightAvg ? 'sinistra' : 'destra';
+            pushFeedback('Ruoti meno verso ' + weakerSide + ': prova a raggiungere la stessa ampiezza su entrambi i lati.', false);
+          }
+        }
       }
 
       return {
@@ -2142,13 +2264,46 @@ const EXERCISES = {
       const raisedSide = leftRaise >= rightRaise ? 'sinistro' : 'destro';
       const kneeHigh = raised > 0.02;
 
-      if(exState.phase === undefined){ exState.phase = 'down'; exState.phaseStart = null; }
+      if(exState.phase === undefined){
+        exState.phase = 'down'; exState.phaseStart = null;
+        // Medie separate per lato lungo tutta la serie, per accorgersi di
+        // un'asimmetria persistente (es. un fianco meno mobile dell'altro)
+        // — non un controllo su un singolo colpo, che sarebbe solo rumore.
+        exState.leftSum = 0; exState.leftCount = 0;
+        exState.rightSum = 0; exState.rightCount = 0;
+        exState.peakRaise = 0; exState.peakSide = null;
+        exState.asymWarnedAt = 0;
+      }
       if(exState.phase === 'down' && kneeHigh){
         exState.phase = 'up';
         exState.phaseStart = performance.now();
-      } else if(exState.phase === 'up' && !kneeHigh){
-        exState.phase = 'down';
-        completeRep(repTooFast(exState.phaseStart), 'Movimento troppo rapido o instabile: ripetizione non conteggiata.');
+        exState.peakRaise = raised;
+        exState.peakSide = raisedSide;
+      } else if(exState.phase === 'up'){
+        if(raised > exState.peakRaise){ exState.peakRaise = raised; exState.peakSide = raisedSide; }
+        if(!kneeHigh){
+          exState.phase = 'down';
+          if(exState.peakSide === 'sinistro'){ exState.leftSum += exState.peakRaise; exState.leftCount++; }
+          else { exState.rightSum += exState.peakRaise; exState.rightCount++; }
+          completeRep(repTooFast(exState.phaseStart), 'Movimento troppo rapido o instabile: ripetizione non conteggiata.');
+
+          // Confronto solo dopo almeno 3 sollevamenti per lato, e non più
+          // spesso di una volta ogni 6 ripetizioni: un'unica gamba un po'
+          // più bassa ogni tanto è normale, quello che conta è una
+          // differenza che si mantiene nel tempo.
+          const totalReps = exState.leftCount + exState.rightCount;
+          if(exState.leftCount >= 3 && exState.rightCount >= 3 && totalReps - exState.asymWarnedAt >= 6){
+            const leftAvg = exState.leftSum / exState.leftCount;
+            const rightAvg = exState.rightSum / exState.rightCount;
+            const stronger = Math.max(leftAvg, rightAvg);
+            const weaker = Math.min(leftAvg, rightAvg);
+            if(stronger > 0.01 && weaker / stronger < 0.65){
+              exState.asymWarnedAt = totalReps;
+              const weakerSide = leftAvg < rightAvg ? 'sinistro' : 'destro';
+              pushFeedback('Il ginocchio ' + weakerSide + ' si alza meno dell\'altro in media: prova a bilanciare il movimento.', false);
+            }
+          }
+        }
       }
 
       return {
@@ -2581,6 +2736,10 @@ function startRestTimer(seconds, nextLabel, onComplete){
   restIntervalId = setInterval(() => {
     restRemaining--;
     restCountdown.textContent = formatRestTime(Math.max(0, restRemaining));
+    // Negli ultimi 3 secondi, un conto alla rovescia vocale: così chi si sta
+    // riposando lontano dallo schermo sa quando sta per ripartire senza
+    // dover guardare il telefono.
+    if(voiceEnabled && restRemaining > 0 && restRemaining <= 3) speak(String(restRemaining));
     if(restRemaining <= 0){
       clearInterval(restIntervalId);
       completeRest();
@@ -2610,11 +2769,14 @@ restBtn.addEventListener('click', () => {
   startRestTimer(restDuration, '', () => {});
 });
 
+// Esistono due selettori identici per lo stesso valore (circuito e serie
+// singole in modalità un esercizio): tenerli sincronizzati in base al
+// valore, non a quale dei due è stato toccato, così mostrano sempre la
+// stessa scelta ovunque siano visibili.
 restPresetButtons.forEach(btn => {
   btn.addEventListener('click', () => {
-    restPresetButtons.forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
     restDuration = parseInt(btn.dataset.rest, 10);
+    restPresetButtons.forEach(b => b.classList.toggle('active', parseInt(b.dataset.rest, 10) === restDuration));
   });
 });
 
@@ -2854,7 +3016,7 @@ function selectExercise(key){
 // modalità singolo esercizio; in modalità circuito il traguardo è già gestito
 // per esercizio dal circuito stesso, quindi qui resta nascosto.
 function updateGoalUI(){
-  if(appMode !== 'single'){ repGoalRow.style.display = 'none'; return; }
+  if(appMode !== 'single'){ repGoalRow.style.display = 'none'; setBadge.style.display = 'none'; singleRestPresetWrap.style.display = 'none'; return; }
   const ex = EXERCISES[currentExercise];
   repGoalRow.style.display = 'flex';
   if(ex.mode === 'reps'){
@@ -2864,6 +3026,9 @@ function updateGoalUI(){
     repGoalInput.value = timerGoalSeconds;
     repGoalUnit.textContent = 'secondi';
   }
+  setsGoalInput.value = setsGoal;
+  singleRestPresetWrap.style.display = setsGoal > 1 ? 'block' : 'none';
+  updateSetBadge();
 }
 
 repGoalInput.addEventListener('change', () => {
@@ -2873,6 +3038,27 @@ repGoalInput.addEventListener('change', () => {
   if(ex.mode === 'reps') repGoal = val;
   else timerGoalSeconds = val;
 });
+
+setsGoalInput.addEventListener('change', () => {
+  const val = Math.max(1, parseInt(setsGoalInput.value, 10) || 1);
+  setsGoalInput.value = val;
+  setsGoal = val;
+  if(currentSet > setsGoal) currentSet = setsGoal;
+  singleRestPresetWrap.style.display = setsGoal > 1 ? 'block' : 'none';
+  updateSetBadge();
+});
+
+// Mostra "Serie X di Y" durante il tracciamento attivo, solo quando sono
+// previste più serie dello stesso esercizio (con una sola serie il badge
+// sarebbe ridondante col resto dell'interfaccia).
+function updateSetBadge(){
+  if(appMode === 'single' && setsGoal > 1 && appState === 'active'){
+    setBadge.style.display = 'block';
+    setBadge.textContent = 'Serie ' + currentSet + ' di ' + setsGoal;
+  } else {
+    setBadge.style.display = 'none';
+  }
+}
 
 function stopCameraStream(){
   if(video.srcObject){
@@ -2925,6 +3111,9 @@ function resetMetrics(){
   timerSeconds = 0; timerNum.textContent = '0:00';
   exState = {};
   feedbackList.innerHTML = '';
+  currentSet = 1;
+  setBaseline = 0;
+  updateSetBadge();
 }
 
 function hasCurrentActivity(){
@@ -2969,6 +3158,11 @@ function showSessionSummary(onClose){
   }
   const topError = topErrorReason();
   if(topError) addRow('Errore più frequente', topError);
+  if(setsGoal > 1){
+    const setsDone = (currentSet >= setsGoal && exState.goalCelebrated) ? setsGoal : currentSet;
+    addRow('Serie completate', setsDone + ' di ' + setsGoal);
+    summaryText += '\n' + setsDone + '/' + setsGoal + ' serie completate';
+  }
 
   sessionSummaryOverlay.style.display = 'flex';
   sessionSummaryShareBtn.onclick = () => shareText(summaryText);
@@ -3417,9 +3611,9 @@ function renderLoop(){
         const mm = Math.floor(timerSeconds/60);
         const ss = Math.floor(timerSeconds%60).toString().padStart(2,'0');
         timerNum.textContent = mm + ':' + ss;
-        if(!circuitActive && timerSeconds >= timerGoalSeconds && !exState.goalCelebrated){
+        if(!circuitActive && (timerSeconds - setBaseline) >= timerGoalSeconds && !exState.goalCelebrated){
           exState.goalCelebrated = true;
-          pushFeedback('🎯 Traguardo raggiunto: ' + timerGoalSeconds + ' secondi in tenuta corretta!', true);
+          handleGoalReached(timerGoalSeconds + ' secondi in tenuta corretta');
         }
         if(circuitActive && !isResting && timerSeconds >= circuitList[circuitIndex].target){
           triggerCircuitAdvance();
