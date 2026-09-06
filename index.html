@@ -1219,6 +1219,36 @@ function repTooFast(phaseStartTime){
   return phaseStartTime == null || (performance.now() - phaseStartTime) < MIN_REP_MS;
 }
 
+// Avviso vocale immediato quando lo scheletro diventa rosso (forma
+// scorretta), invece di aspettare la fine della ripetizione/tenuta: segnala
+// subito il problema e come correggerlo, con lo stesso messaggio già
+// mostrato a schermo (formato "problema: correzione"). Un piccolo tempo
+// minimo di persistenza evita falsi allarmi per un singolo fotogramma
+// rumoroso; una volta avvisato, tace finché la forma non torna corretta e
+// poi scorretta di nuovo, per non ripetere lo stesso avviso a raffica.
+let realtimeIssueSince = null;
+let realtimeIssueAnnounced = false;
+const REALTIME_ISSUE_MIN_MS = 350;
+
+function announceRealtimeIssue(evalResult){
+  if(evalResult.ok){
+    realtimeIssueSince = null;
+    realtimeIssueAnnounced = false;
+    return;
+  }
+  const now = performance.now();
+  if(realtimeIssueSince == null) realtimeIssueSince = now;
+  if(!realtimeIssueAnnounced && now - realtimeIssueSince >= REALTIME_ISSUE_MIN_MS){
+    realtimeIssueAnnounced = true;
+    if(voiceEnabled) pushFeedback(evalResult.statusMsg, false);
+  }
+}
+
+function resetRealtimeIssueTracking(){
+  realtimeIssueSince = null;
+  realtimeIssueAnnounced = false;
+}
+
 // --- feedback vocale ---
 let voiceEnabled = false;
 let italianVoice = null;
@@ -1356,6 +1386,37 @@ if(speechSupported){
     }
     try{ window.speechSynthesis.resume(); } catch(e){ /* sintesi non disponibile */ }
   });
+}
+
+// Terza rete di sicurezza: il bug forse più comune del vocale su Chrome
+// (desktop e Android) è che, dopo una frase o due, il motore di sintesi
+// resta "congelato" — una notifica, la perdita del focus audio o anche solo
+// il passare del tempo lo mettono in pausa (o in uno stato interno bloccato)
+// senza che nessun evento lo segnali, e ogni speak() successiva viene
+// accodata ma non pronunciata mai più, in silenzio, per il resto della
+// sessione. Un pause()+resume() periodico mentre si sta parlando (o un
+// semplice resume() se risulta in pausa senza parlare) è la mitigazione
+// standard e documentata per questo problema della Web Speech API: "sveglia"
+// il motore prima che riesca a bloccarsi per davvero.
+if(speechSupported){
+  setInterval(() => {
+    const synth = window.speechSynthesis;
+    try{
+      if(synth.speaking){
+        synth.pause();
+        synth.resume();
+      } else if(synth.paused){
+        synth.resume();
+      }
+      // Rete di sicurezza aggiuntiva: se la nostra coda si crede ancora
+      // "occupata" ma il motore non sta né parlando né per farlo, qualcosa
+      // si è disallineato (es. il watchdog della singola frase non è
+      // scattato) — la sblocca comunque, invece di restare muta per sempre.
+      if(speechBusy && !synth.speaking && !synth.pending && forceFinishSpeech){
+        forceFinishSpeech();
+      }
+    } catch(e){ /* non deve mai interrompere il resto dell'app */ }
+  }, 4000);
 }
 
 function updateVoiceBtn(){
@@ -1682,7 +1743,6 @@ const EXERCISES = {
 
       const ok = issues.length === 0;
       if(ok && Math.random() < 0.02) pushFeedback('Linea corpo perfetta, continua così.', true);
-      else if(!ok && Math.random() < 0.15) pushFeedback(issues[0], false);
 
       return {
         ok,
@@ -1727,7 +1787,6 @@ const EXERCISES = {
       if(!straight) issues.push('Bacino non allineato: mantieni fianchi, spalle e caviglie sulla stessa linea.');
       const ok = issues.length === 0;
       if(ok && Math.random() < 0.02) pushFeedback('Ottimo allineamento, tieni duro.', true);
-      else if(!ok && Math.random() < 0.15) pushFeedback(issues[0], false);
 
       return {
         ok,
@@ -1891,7 +1950,6 @@ const EXERCISES = {
           exState.issueSince = null;
         }
       }
-      if(issues.length && Math.random() < 0.2) pushFeedback(issues[0], false);
 
       return {
         ok,
@@ -3110,6 +3168,7 @@ function resetMetrics(){
   sessionErrorTally = {};
   timerSeconds = 0; timerNum.textContent = '0:00';
   exState = {};
+  resetRealtimeIssueTracking();
   feedbackList.innerHTML = '';
   currentSet = 1;
   setBaseline = 0;
@@ -3630,6 +3689,7 @@ function renderLoop(){
     if(evalResult){
       drawSkeleton(lm, evalResult.ok);
       setStatus(evalResult.ok, evalResult.statusMsg);
+      announceRealtimeIssue(evalResult);
 
       evalResult.metrics.forEach((m, i) => {
         const el = metricValueEls[i];
