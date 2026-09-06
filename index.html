@@ -226,6 +226,30 @@
   .status-dot.bad{ background:var(--bad); box-shadow:0 0 0 4px rgba(255,92,92,0.18), 0 0 18px rgba(255,92,92,0.4);}
   .status-text{ font-size:14px; font-weight:500; }
 
+  /* Sottotitoli: stesso testo che verrebbe pronunciato dal vocale, a schermo
+     e in grande — utile con l'audio disattivato/assente o per chi è
+     ipoudente. Restano sopra il video ma sotto la barra di stato, in modo
+     da non sovrapporsi. */
+  .caption-overlay{
+    position:absolute;
+    left:50%; bottom:66px;
+    transform:translateX(-50%);
+    max-width:88%;
+    background:rgba(8,10,9,0.82);
+    backdrop-filter:blur(2px);
+    color:#fff;
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:600;
+    font-size:15px;
+    line-height:1.4;
+    padding:10px 16px;
+    border-radius:var(--radius-md);
+    text-align:center;
+    z-index:6;
+    pointer-events:none;
+    animation:overlayIn .15s var(--ease);
+  }
+
   .panel{
     background:linear-gradient(175deg, var(--panel), var(--panel-2) 130%);
     border:1px solid var(--line);
@@ -421,6 +445,10 @@
   .metric-value{ font-family:'Space Grotesk', sans-serif; font-size:20px; font-weight:600; transition:color .2s var(--ease); }
   .metric-value.ok{ color:var(--ok); }
   .metric-value.bad{ color:var(--bad); }
+  /* Il colore da solo non basta per chi ha il daltonismo: un simbolo affianca
+     sempre il colore, per correttezza/errore riconoscibile in ogni caso. */
+  .metric-value.ok::before{ content:'✓ '; }
+  .metric-value.bad::before{ content:'✗ '; }
 
   .feedback-list{
     display:flex;
@@ -443,7 +471,9 @@
     to{ opacity:1; transform:translateY(0); }
   }
   .fb-item.bad{ border-left-color:var(--bad); }
+  .fb-item.bad::before{ content:'⚠ '; }
   .fb-item.ok{ border-left-color:var(--ok); color:var(--ink-dim); }
+  .fb-item.ok::before{ content:'✓ '; }
 
   .rep-counter{
     display:flex;
@@ -692,6 +722,12 @@
         </div>
         <div class="calib-progress" style="width:220px;"><div class="calib-progress-bar" id="goalProgressBar"></div></div>
         <div id="goalProgressLabel" style="font-size:11.5px; color:var(--ink-dim);"></div>
+        <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-dim);">
+          <span>Peso corporeo, per stimare le calorie</span>
+          <input type="number" id="bodyWeightInput" min="30" max="250" placeholder="70" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'IBM Plex Mono', monospace;">
+          <span>kg</span>
+        </div>
+        <div id="caloriesTotalBadge" class="calib-status-note" style="display:none;"></div>
       </div>
       <div id="historyChart" style="width:100%; max-width:340px;"></div>
       <div id="historyList" style="width:100%; max-width:340px; max-height:36vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
@@ -711,6 +747,7 @@
       </div>
       <button class="calib-skip" id="onboardingSkipBtn">Salta</button>
     </div>
+    <div class="caption-overlay" id="captionOverlay" style="display:none;"></div>
     <div class="stage-status">
       <div class="status-dot" id="statusDot"></div>
       <div class="status-text" id="statusText">In attesa della fotocamera</div>
@@ -777,6 +814,8 @@
     </div>
 
     <div class="circuit-builder" id="circuitBuilder" style="display:none;">
+      <div class="section-label">Programmi salvati</div>
+      <div id="savedProgramsList" style="display:flex; flex-direction:column; gap:6px; margin-bottom:14px;"></div>
       <div class="section-label">Scegli gli esercizi del circuito, in ordine</div>
       <div id="circuitList"></div>
       <div class="section-label" style="margin-top:14px;">Riposo tra un esercizio e l'altro</div>
@@ -785,6 +824,7 @@
         <button class="cam-btn restpreset-btn active" data-rest="60">60s</button>
         <button class="cam-btn restpreset-btn" data-rest="90">90s</button>
       </div>
+      <button class="btn" id="saveProgramBtn" style="width:100%; margin-top:14px;">💾 Salva come programma</button>
     </div>
 
     <div class="calib-status-note" id="circuitProgressNote" style="display:none;"></div>
@@ -800,6 +840,11 @@
     <div>
       <div class="section-label">Feedback vocale</div>
       <button class="btn" id="voiceBtn" style="width:100%;">🔈 Vocale disattivato — tocca per attivare</button>
+    </div>
+
+    <div>
+      <div class="section-label">Sottotitoli</div>
+      <button class="btn" id="captionsBtn" style="width:100%;">💬 Sottotitoli disattivati — tocca per attivare</button>
     </div>
 
     <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
@@ -904,11 +949,15 @@ const thresholdCalibBar = document.getElementById('thresholdCalibBar');
 const thresholdCalibCancel = document.getElementById('thresholdCalibCancel');
 const camButtons = document.querySelectorAll('.cam-btn[data-facing]');
 const voiceBtn = document.getElementById('voiceBtn');
+const captionsBtn = document.getElementById('captionsBtn');
+const captionOverlay = document.getElementById('captionOverlay');
 
 const modeSelect = document.getElementById('modeSelect');
 const singleModeSection = document.getElementById('singleModeSection');
 const circuitBuilder = document.getElementById('circuitBuilder');
 const circuitListEl = document.getElementById('circuitList');
+const savedProgramsList = document.getElementById('savedProgramsList');
+const saveProgramBtn = document.getElementById('saveProgramBtn');
 const restPresetButtons = document.querySelectorAll('.restpreset-btn');
 const circuitProgressNote = document.getElementById('circuitProgressNote');
 const restBtn = document.getElementById('restBtn');
@@ -936,6 +985,8 @@ const streakBadge = document.getElementById('streakBadge');
 const goalWeeklyInput = document.getElementById('goalWeeklyInput');
 const goalProgressBar = document.getElementById('goalProgressBar');
 const goalProgressLabel = document.getElementById('goalProgressLabel');
+const bodyWeightInput = document.getElementById('bodyWeightInput');
+const caloriesTotalBadge = document.getElementById('caloriesTotalBadge');
 const historyChart = document.getElementById('historyChart');
 const historyList = document.getElementById('historyList');
 const historyExportBtn = document.getElementById('historyExportBtn');
@@ -1108,6 +1159,8 @@ let fpsSmooth = 0;
 let metricValueEls = [];
 let exState = {}; // stato interno per-esercizio (fase reps, ecc.)
 let lastTimerTick = performance.now();
+let activeElapsedMs = 0; // tempo effettivo sotto sforzo sull'esercizio corrente (per la stima calorie)
+let lastActiveTick = performance.now();
 
 const VIEW_META = {
   laterale: { icon:'◐', title:'Vista laterale' },
@@ -1148,7 +1201,7 @@ function handleGoalReached(achievedLabel){
   setBaseline = ex.mode === 'reps' ? repCount : timerSeconds;
   currentSet++;
   updateSetBadge();
-  startRestTimer(restDuration, 'Serie ' + currentSet + ' di ' + setsGoal, () => {
+  startRestTimer(personalizedRestSeconds(restDuration), 'Serie ' + currentSet + ' di ' + setsGoal, () => {
     exState = {}; // fa ripartire pulita la fase/i contatori interni della prossima serie
   });
 }
@@ -1226,27 +1279,47 @@ function repTooFast(phaseStartTime){
 // minimo di persistenza evita falsi allarmi per un singolo fotogramma
 // rumoroso; una volta avvisato, tace finché la forma non torna corretta e
 // poi scorretta di nuovo, per non ripetere lo stesso avviso a raffica.
+//
+// Simmetricamente, per gli esercizi a tenuta (plank, plank laterale, sedia a
+// muro) la forma corretta non richiede una "ripetizione" che la confermi
+// come per gli esercizi a ripetizioni (dove ogni rep valida viene annunciata
+// da completeRep) — senza un avviso a parte, chi tiene la posizione
+// correttamente non sentirebbe mai nulla e dovrebbe guardare lo schermo per
+// esserne sicuro. Un annuncio periodico "posizione corretta, non muoverti"
+// mentre la tenuta è corretta copre lo stesso bisogno: non serve guardare il
+// telefono né quando si sbaglia né quando si sta facendo bene.
 let realtimeIssueSince = null;
 let realtimeIssueAnnounced = false;
 const REALTIME_ISSUE_MIN_MS = 350;
+let lastHoldOkAnnounce = 0;
+const HOLD_OK_ANNOUNCE_MS = 6000;
 
 function announceRealtimeIssue(evalResult){
   if(evalResult.ok){
     realtimeIssueSince = null;
     realtimeIssueAnnounced = false;
+    const ex = EXERCISES[currentExercise];
+    if(ex && ex.mode === 'timer'){
+      const now = performance.now();
+      if(now - lastHoldOkAnnounce >= HOLD_OK_ANNOUNCE_MS){
+        lastHoldOkAnnounce = now;
+        pushFeedback('Posizione corretta, non muoverti.', true);
+      }
+    }
     return;
   }
   const now = performance.now();
   if(realtimeIssueSince == null) realtimeIssueSince = now;
   if(!realtimeIssueAnnounced && now - realtimeIssueSince >= REALTIME_ISSUE_MIN_MS){
     realtimeIssueAnnounced = true;
-    if(voiceEnabled) pushFeedback(evalResult.statusMsg, false);
+    pushFeedback(evalResult.statusMsg, false);
   }
 }
 
 function resetRealtimeIssueTracking(){
   realtimeIssueSince = null;
   realtimeIssueAnnounced = false;
+  lastHoldOkAnnounce = 0;
 }
 
 // --- feedback vocale ---
@@ -1451,11 +1524,69 @@ voiceBtn.addEventListener('click', () => {
 });
 if(speechSupported) updateVoiceBtn();
 
+// --- sottotitoli ---
+// Stesso testo del feedback vocale, mostrato in grande sopra il video:
+// utile con l'audio disattivato o assente, o per chi è ipoudente. È
+// volutamente indipendente dal vocale vero e proprio (funziona anche a
+// vocale spento) e usa la stessa stima di durata del watchdog vocale, così
+// il tempo di permanenza a schermo resta vicino a quanto durerebbe la
+// frase se pronunciata.
+const CAPTIONS_STORAGE_KEY = 'formacheck_captions_v1';
+let captionsEnabled = false;
+try{ captionsEnabled = localStorage.getItem(CAPTIONS_STORAGE_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
+let captionQueue = [];
+let captionBusy = false;
+let captionTimeoutId = null;
+
+function updateCaptionsBtn(){
+  captionsBtn.textContent = captionsEnabled
+    ? '💬 Sottotitoli attivi — tocca per disattivare'
+    : '💬 Sottotitoli disattivati — tocca per attivare';
+  captionsBtn.classList.toggle('primary', captionsEnabled);
+}
+updateCaptionsBtn();
+
+function clearCaptionQueue(){
+  captionQueue = [];
+  captionBusy = false;
+  if(captionTimeoutId){ clearTimeout(captionTimeoutId); captionTimeoutId = null; }
+  captionOverlay.style.display = 'none';
+}
+
+function pumpCaptionQueue(){
+  if(captionBusy || captionQueue.length === 0) return;
+  const text = captionQueue.shift();
+  captionBusy = true;
+  captionOverlay.textContent = text;
+  captionOverlay.style.display = 'block';
+  const ms = Math.min(6000, 1200 + text.length * 70);
+  captionTimeoutId = setTimeout(() => {
+    captionBusy = false;
+    captionTimeoutId = null;
+    if(captionQueue.length === 0) captionOverlay.style.display = 'none';
+    pumpCaptionQueue();
+  }, ms);
+}
+
+function queueCaption(text){
+  if(!captionsEnabled || !text) return;
+  captionQueue.push(text);
+  pumpCaptionQueue();
+}
+
+captionsBtn.addEventListener('click', () => {
+  captionsEnabled = !captionsEnabled;
+  updateCaptionsBtn();
+  try{ localStorage.setItem(CAPTIONS_STORAGE_KEY, captionsEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
+  if(!captionsEnabled) clearCaptionQueue();
+});
+
 // --- registro esercizi ---
 const EXERCISES = {
   squat: {
     label: 'Squat',
     mode: 'reps',
+    met: 5, // stima MET (Compendium of Physical Activities), usata solo per l'estimatore di calorie: approssimativa, non un dato medico
     view: 'laterale',
     viewNote: "Inquadrati di lato, a figura intera: serve vedere l'angolo del ginocchio e l'inclinazione della schiena.",
     howto: [
@@ -1538,6 +1669,7 @@ const EXERCISES = {
   lunge: {
     label: 'Affondo',
     mode: 'reps',
+    met: 4,
     view: 'laterale',
     viewNote: "Inquadrati di lato, a figura intera: serve vedere entrambe le gambe e il busto.",
     howto: [
@@ -1628,6 +1760,7 @@ const EXERCISES = {
   pushup: {
     label: 'Flessioni',
     mode: 'reps',
+    met: 8,
     view: 'laterale',
     viewNote: "Inquadrati di lato, a figura intera: serve vedere il gomito e la linea spalla-anca-caviglia.",
     howto: [
@@ -1707,6 +1840,7 @@ const EXERCISES = {
   plank: {
     label: 'Plank',
     mode: 'timer',
+    met: 3,
     view: 'laterale',
     viewNote: "Inquadrati di lato, a figura intera: serve vedere la linea spalla-anca-caviglia.",
     howto: [
@@ -1755,6 +1889,7 @@ const EXERCISES = {
   sideplank: {
     label: 'Plank laterale',
     mode: 'timer',
+    met: 3,
     view: 'frontale',
     viewNote: "Sdraiati su un fianco a terra, con la fotocamera davanti a te: serve vedere il fianco appoggiato e la linea del corpo da spalla a caviglia.",
     howto: [
@@ -1799,6 +1934,7 @@ const EXERCISES = {
   glutebridge: {
     label: 'Ponte glutei',
     mode: 'reps',
+    met: 3,
     view: 'laterale',
     viewNote: "Inquadrati di lato, sdraiato a terra nell'inquadratura: serve vedere anca e ginocchio.",
     howto: [
@@ -1890,6 +2026,7 @@ const EXERCISES = {
   jumpingjack: {
     label: 'Jumping jack',
     mode: 'reps',
+    met: 8,
     view: 'frontale',
     viewNote: "Inquadrati frontalmente, a figura intera, con spazio ai lati per aprire braccia e gambe.",
     howto: [
@@ -1965,6 +2102,7 @@ const EXERCISES = {
   mountainclimber: {
     label: 'Mountain climber',
     mode: 'reps',
+    met: 8,
     view: 'laterale',
     viewNote: "Inquadrati di lato, a figura intera, in posizione plank: serve vedere anca e ginocchia.",
     howto: [
@@ -2024,6 +2162,7 @@ const EXERCISES = {
   burpee: {
     label: 'Burpee',
     mode: 'reps',
+    met: 10,
     view: 'laterale',
     viewNote: "Inquadrati di lato, con spazio sopra e sotto per vedere sia la posizione a terra sia il salto in piedi.",
     howto: [
@@ -2069,6 +2208,7 @@ const EXERCISES = {
   crunch: {
     label: 'Crunch',
     mode: 'reps',
+    met: 3.8,
     view: 'laterale',
     viewNote: "Inquadrati di lato, sdraiato con le ginocchia piegate: serve vedere spalla, anca e ginocchio.",
     howto: [
@@ -2132,6 +2272,7 @@ const EXERCISES = {
   legraise: {
     label: 'Sollevamento gambe',
     mode: 'reps',
+    met: 3.5,
     view: 'laterale',
     viewNote: "Inquadrati di lato, sdraiato con le gambe distese: serve vedere spalla, anca e caviglia.",
     howto: [
@@ -2195,6 +2336,7 @@ const EXERCISES = {
   russiantwist: {
     label: 'Russian twist',
     mode: 'reps',
+    met: 4,
     view: 'frontale',
     viewNote: "Inquadrati frontalmente, seduto con il busto leggermente inclinato indietro: serve vedere polsi e spalle.",
     howto: [
@@ -2242,7 +2384,7 @@ const EXERCISES = {
         const invalidParts = tooFast
           ? 'Movimento troppo rapido o instabile: torsione non conteggiata.'
           : rejectRepSequence('Tieni le mani più basse, vicino all\'addome.');
-        completeRep(tooFast || handsTooHigh, invalidParts);
+        completeRep(tooFast || handsTooHigh, invalidParts, 'Torsione completa, buon controllo.');
 
         const totalReps = exState.leftCount + exState.rightCount;
         if(exState.leftCount >= 3 && exState.rightCount >= 3 && totalReps - exState.asymWarnedAt >= 6){
@@ -2269,6 +2411,7 @@ const EXERCISES = {
   bicyclecrunch: {
     label: 'Bicycle crunch',
     mode: 'reps',
+    met: 4,
     view: 'laterale',
     viewNote: "Inquadrati di lato, sdraiato con le mani dietro la testa: serve vedere gomito e ginocchio. Esercizio sperimentale: il movimento incrociato è difficile da validare in 2D, il conteggio è indicativo.",
     howto: [
@@ -2289,7 +2432,7 @@ const EXERCISES = {
         exState.phaseStart = performance.now();
       } else if(exState.phase === 'near' && dist > 0.28){
         exState.phase = 'far';
-        completeRep(repTooFast(exState.phaseStart), 'Movimento troppo rapido o instabile: ripetizione non conteggiata.');
+        completeRep(repTooFast(exState.phaseStart), 'Movimento troppo rapido o instabile: ripetizione non conteggiata.', 'Ciclo pedalata completo, bacino stabile.');
       }
 
       return {
@@ -2303,6 +2446,7 @@ const EXERCISES = {
   highknees: {
     label: 'Ginocchia alte',
     mode: 'reps',
+    met: 8,
     view: 'frontale',
     viewNote: "Inquadrati frontalmente, a figura intera: serve vedere anca e ginocchia mentre corri sul posto.",
     howto: [
@@ -2343,7 +2487,7 @@ const EXERCISES = {
           exState.phase = 'down';
           if(exState.peakSide === 'sinistro'){ exState.leftSum += exState.peakRaise; exState.leftCount++; }
           else { exState.rightSum += exState.peakRaise; exState.rightCount++; }
-          completeRep(repTooFast(exState.phaseStart), 'Movimento troppo rapido o instabile: ripetizione non conteggiata.');
+          completeRep(repTooFast(exState.phaseStart), 'Movimento troppo rapido o instabile: ripetizione non conteggiata.', 'Buon ritmo, ginocchio in alto.');
 
           // Confronto solo dopo almeno 3 sollevamenti per lato, e non più
           // spesso di una volta ogni 6 ripetizioni: un'unica gamba un po'
@@ -2378,6 +2522,7 @@ const EXERCISES = {
   wallsit: {
     label: 'Sedia a muro',
     mode: 'timer',
+    met: 3,
     view: 'laterale',
     viewNote: "Inquadrati di lato, con la schiena appoggiata a un muro: serve vedere l'angolo del ginocchio.",
     howto: [
@@ -2421,6 +2566,7 @@ const EXERCISES = {
   chairdip: {
     label: 'Dip su sedia',
     mode: 'reps',
+    met: 5,
     view: 'laterale',
     viewNote: "Inquadrati di lato, seduto sul bordo di una sedia con le mani accanto ai fianchi: serve vedere il gomito.",
     howto: [
@@ -2565,7 +2711,8 @@ function logSessionIfActive(){
     mode: ex.mode,
     valid: repCount,
     invalid: invalidRepCount,
-    seconds: Math.round(timerSeconds)
+    seconds: Math.round(timerSeconds),
+    activeMs: Math.round(activeElapsedMs)
   });
 }
 
@@ -2671,12 +2818,57 @@ function renderGoalPanel(){
   const pct = Math.min(100, Math.round((weekCount / goal.weeklyTarget) * 100));
   goalProgressBar.style.width = pct + '%';
   goalProgressLabel.textContent = weekCount + ' / ' + goal.weeklyTarget + ' allenamenti questa settimana';
+
+  bodyWeightInput.value = loadBodyWeight() || '';
+  const totalKcal = loadHistory().reduce((sum, e) => sum + estimateKcal(e.key, e.activeMs || 0), 0);
+  if(totalKcal >= 1){
+    caloriesTotalBadge.style.display = 'block';
+    caloriesTotalBadge.textContent = '🔥 circa ' + Math.round(totalKcal) + ' kcal stimate in totale';
+  } else {
+    caloriesTotalBadge.style.display = 'none';
+  }
 }
 
 goalWeeklyInput.addEventListener('change', () => {
   const val = Math.max(1, Math.min(14, parseInt(goalWeeklyInput.value, 10) || 3));
   goalWeeklyInput.value = val;
   saveGoal({ weeklyTarget: val });
+  renderGoalPanel();
+});
+
+// --- stima calorie ---
+// Approssimazione MET × peso × tempo (Compendium of Physical Activities):
+// dà un'idea di massima dello sforzo, non un conteggio medico preciso — va
+// sempre presentata come stima.
+const WEIGHT_STORAGE_KEY = 'formacheck_weight_v1';
+const DEFAULT_BODY_WEIGHT_KG = 70; // usato quando l'utente non ha impostato il proprio peso
+
+function loadBodyWeight(){
+  try{
+    const val = parseFloat(localStorage.getItem(WEIGHT_STORAGE_KEY));
+    return (val && val > 0) ? val : null;
+  } catch(e){ return null; }
+}
+function saveBodyWeight(kg){
+  try{ localStorage.setItem(WEIGHT_STORAGE_KEY, String(kg)); } catch(e){ /* storage non disponibile */ }
+}
+
+function estimateKcal(exerciseKey, activeMs){
+  const ex = EXERCISES[exerciseKey];
+  if(!ex || !ex.met || !activeMs) return 0;
+  const weight = loadBodyWeight() || DEFAULT_BODY_WEIGHT_KG;
+  const hours = activeMs / 3600000;
+  return ex.met * weight * hours;
+}
+
+bodyWeightInput.addEventListener('change', () => {
+  const val = parseFloat(bodyWeightInput.value);
+  if(val >= 30 && val <= 250){
+    saveBodyWeight(val);
+  } else {
+    bodyWeightInput.value = '';
+    try{ localStorage.removeItem(WEIGHT_STORAGE_KEY); } catch(e){ /* storage non disponibile */ }
+  }
   renderGoalPanel();
 });
 
@@ -2783,6 +2975,22 @@ function formatRestTime(sec){
   return m > 0 ? (m + ':' + String(s).padStart(2, '0')) : String(s);
 }
 
+// Tempo di riposo "personalizzato": allunga il preset scelto dall'utente se
+// la serie appena conclusa ha avuto molte ripetizioni scartate per forma
+// scorretta — un segnale indiretto di fatica. Resta comunque solo un
+// suggerimento (il riposo si può sempre saltare); si applica solo agli
+// esercizi a ripetizioni, per cui questo segnale è disponibile.
+function personalizedRestSeconds(baseSeconds){
+  const ex = EXERCISES[currentExercise];
+  if(!ex || ex.mode !== 'reps') return baseSeconds;
+  const total = repCount + invalidRepCount;
+  if(total < 3) return baseSeconds; // troppo pochi dati per un suggerimento affidabile
+  const errorRate = invalidRepCount / total;
+  if(errorRate > 0.4) return Math.round(baseSeconds * 1.5);
+  if(errorRate > 0.2) return Math.round(baseSeconds * 1.25);
+  return baseSeconds;
+}
+
 function startRestTimer(seconds, nextLabel, onComplete){
   isResting = true;
   restRemaining = seconds;
@@ -2868,6 +3076,98 @@ function collectCircuitConfig(){
   return list;
 }
 
+// --- programmi di allenamento salvati ---
+// Un circuito composto al volo si perde alla chiusura della pagina; un
+// programma è lo stesso circuito (esercizi, ordine, traguardi, riposo) salvato
+// con un nome per essere richiamato in un secondo momento senza ricomporlo.
+const PROGRAMS_STORAGE_KEY = 'formacheck_programs_v1';
+
+function loadPrograms(){
+  try{
+    const raw = localStorage.getItem(PROGRAMS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e){ return []; }
+}
+function savePrograms(programs){
+  try{ localStorage.setItem(PROGRAMS_STORAGE_KEY, JSON.stringify(programs)); } catch(e){ /* storage non disponibile */ }
+}
+
+function renderSavedPrograms(){
+  const programs = loadPrograms();
+  savedProgramsList.innerHTML = '';
+  if(programs.length === 0){
+    const note = document.createElement('div');
+    note.style.cssText = 'font-size:12px; color:var(--ink-dim); padding:2px 0 6px;';
+    note.textContent = 'Nessun programma salvato: componi un circuito qui sotto e salvalo per riusarlo.';
+    savedProgramsList.appendChild(note);
+    return;
+  }
+  programs.forEach((p, idx) => {
+    const row = document.createElement('div');
+    row.className = 'circuit-row';
+    row.style.justifyContent = 'space-between';
+    const stepsNote = p.steps.map(s => (EXERCISES[s.key] ? EXERCISES[s.key].label : s.key)).join(', ');
+    row.innerHTML =
+      '<span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;">' +
+        '<strong>' + p.name + '</strong><br>' +
+        '<span style="color:var(--ink-dim); font-size:11px;">' + stepsNote + '</span>' +
+      '</span>' +
+      '<span style="display:flex; gap:6px; flex-shrink:0;">' +
+        '<button class="calib-skip" data-action="load" data-idx="' + idx + '">Carica</button>' +
+        '<button class="calib-skip" data-action="delete" data-idx="' + idx + '">Elimina</button>' +
+      '</span>';
+    savedProgramsList.appendChild(row);
+  });
+}
+
+function applyProgramToBuilder(program){
+  buildCircuitList(); // riparte da una checklist pulita, coerente con gli esercizi attuali
+  program.steps.forEach(step => {
+    const cb = document.getElementById('circ_' + step.key);
+    const targetInput = document.getElementById('circtarget_' + step.key);
+    if(cb) cb.checked = true;
+    if(targetInput) targetInput.value = step.target;
+  });
+  if(program.rest){
+    restDuration = program.rest;
+    restPresetButtons.forEach(b => b.classList.toggle('active', parseInt(b.dataset.rest, 10) === restDuration));
+  }
+  pushFeedback('Programma "' + program.name + '" caricato.', true);
+}
+
+savedProgramsList.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-action]');
+  if(!btn) return;
+  const idx = parseInt(btn.dataset.idx, 10);
+  const programs = loadPrograms();
+  const program = programs[idx];
+  if(!program) return;
+  if(btn.dataset.action === 'load'){
+    applyProgramToBuilder(program);
+  } else if(btn.dataset.action === 'delete'){
+    programs.splice(idx, 1);
+    savePrograms(programs);
+    renderSavedPrograms();
+  }
+});
+
+saveProgramBtn.addEventListener('click', () => {
+  const steps = collectCircuitConfig();
+  if(steps.length === 0){
+    pushFeedback('Seleziona almeno un esercizio prima di salvare il programma.', false);
+    return;
+  }
+  const name = (window.prompt('Nome del programma:') || '').trim();
+  if(!name) return;
+  const programs = loadPrograms();
+  programs.push({ name, steps, rest: restDuration });
+  savePrograms(programs);
+  renderSavedPrograms();
+  pushFeedback('Programma "' + name + '" salvato.', true);
+});
+
+renderSavedPrograms();
+
 modeSelect.querySelectorAll('.ex-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     if(running) return; // la modalità si sceglie prima di avviare la fotocamera
@@ -2917,14 +3217,15 @@ function triggerCircuitAdvance(){
     achieved: ex.mode === 'reps' ? repCount : Math.round(timerSeconds),
     target: step.target,
     unit: ex.mode === 'reps' ? 'reps' : 'sec',
-    invalid: invalidRepCount
+    invalid: invalidRepCount,
+    kcal: estimateKcal(step.key, activeElapsedMs)
   });
   circuitIndex++;
   if(circuitIndex >= circuitList.length){
     finishCircuit();
   } else {
     const nextEx = EXERCISES[circuitList[circuitIndex].key];
-    startRestTimer(restDuration, 'Prossimo: ' + nextEx.label, () => {
+    startRestTimer(personalizedRestSeconds(restDuration), 'Prossimo: ' + nextEx.label, () => {
       runCircuitStep();
     });
   }
@@ -2937,6 +3238,7 @@ function finishCircuit(){
   circuitCancelBtn.style.display = 'none';
   circuitSummaryList.innerHTML = '';
   let summaryText = '💪 FormaCheck — Circuito completato\n';
+  let totalKcal = 0;
   circuitResults.forEach(r => {
     const row = document.createElement('div');
     row.className = 'circuit-summary-row';
@@ -2944,7 +3246,15 @@ function finishCircuit(){
     row.innerHTML = '<span>' + r.label + '</span><span>' + r.achieved + ' / ' + r.target + ' ' + r.unit + invalidNote + '</span>';
     circuitSummaryList.appendChild(row);
     summaryText += '• ' + r.label + ': ' + r.achieved + '/' + r.target + ' ' + r.unit + (r.invalid > 0 ? ' (' + r.invalid + ' scartate)' : '') + '\n';
+    totalKcal += r.kcal || 0;
   });
+  if(totalKcal >= 1){
+    const kcalRow = document.createElement('div');
+    kcalRow.className = 'circuit-summary-row';
+    kcalRow.innerHTML = '<span>Calorie stimate</span><span>~' + Math.round(totalKcal) + ' kcal</span>';
+    circuitSummaryList.appendChild(kcalRow);
+    summaryText += '~' + Math.round(totalKcal) + ' kcal stimate\n';
+  }
   circuitSummaryOverlay.style.display = 'flex';
   circuitSummaryShareBtn.onclick = () => shareText(summaryText);
   if(voiceEnabled) speak('Circuito completato, ottimo lavoro.');
@@ -3169,6 +3479,8 @@ function resetMetrics(){
   timerSeconds = 0; timerNum.textContent = '0:00';
   exState = {};
   resetRealtimeIssueTracking();
+  activeElapsedMs = 0;
+  lastActiveTick = performance.now();
   feedbackList.innerHTML = '';
   currentSet = 1;
   setBaseline = 0;
@@ -3198,6 +3510,7 @@ function stopSession(){
   stopCameraStream();
   lastVideoTime = -1;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  clearCaptionQueue();
 
   appState = 'idle';
   calibOverlay.style.display = 'none';
@@ -3251,6 +3564,16 @@ function showSessionSummary(onClose){
   }
   const topError = topErrorReason();
   if(topError) addRow('Errore più frequente', topError);
+  const activeSeconds = Math.round(activeElapsedMs / 1000);
+  if(activeSeconds > 0){
+    addRow('Tempo sotto sforzo', formatRestTime(activeSeconds));
+    summaryText += '\n' + formatRestTime(activeSeconds) + ' sotto sforzo';
+  }
+  const kcal = estimateKcal(currentExercise, activeElapsedMs);
+  if(kcal >= 1){
+    addRow('Calorie stimate', '~' + Math.round(kcal) + ' kcal');
+    summaryText += '\n~' + Math.round(kcal) + ' kcal stimate';
+  }
   if(setsGoal > 1){
     const setsDone = (currentSet >= setsGoal && exState.goalCelebrated) ? setsGoal : currentSet;
     addRow('Serie completate', setsDone + ' di ' + setsGoal);
@@ -3339,13 +3662,14 @@ function renderHistory(){
 function exportHistory(){
   const hist = loadHistory();
   if(hist.length === 0) return;
-  const header = 'Data,Ora,Esercizio,Modalita,Valide,Scartate,Secondi\n';
+  const header = 'Data,Ora,Esercizio,Modalita,Valide,Scartate,Secondi,KcalStimate\n';
   const rows = hist.map(e => {
     const d = new Date(e.ts);
     const dateStr = d.toLocaleDateString('it-IT');
     const timeStr = d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
     const label = (e.label || '').replace(/,/g, ' ');
-    return [dateStr, timeStr, label, e.mode, e.valid || 0, e.invalid || 0, e.seconds || 0].join(',');
+    const kcal = Math.round(estimateKcal(e.key, e.activeMs || 0));
+    return [dateStr, timeStr, label, e.mode, e.valid || 0, e.invalid || 0, e.seconds || 0, kcal].join(',');
   }).join('\n');
   const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -3406,7 +3730,7 @@ function pushFeedbackSequence(parts, ok){
   div.textContent = clean.join(' ');
   feedbackList.prepend(div);
   while(feedbackList.children.length > 8) feedbackList.removeChild(feedbackList.lastChild);
-  clean.forEach(p => speak(p));
+  clean.forEach(p => { speak(p); queueCaption(p); });
 }
 
 // --- geometry helpers ---
@@ -3538,8 +3862,13 @@ function drawSkeleton(lm, ok){
     [23,25],[25,27],[24,26],[26,28],
     [27,31],[28,32]
   ];
-  ctx.lineWidth = 3;
+  // Il colore da solo (verde/rosso) non basta per chi ha il daltonismo: lo
+  // scheletro scorretto è anche tratteggiato e leggermente più spesso, e
+  // porta un badge con un simbolo (✓/✗) accanto alla testa — riconoscibile
+  // a colpo d'occhio indipendentemente dal colore percepito.
+  ctx.lineWidth = ok ? 3 : 4;
   ctx.strokeStyle = color;
+  ctx.setLineDash(ok ? [] : [10, 6]);
   connections.forEach(([a,b]) => {
     const pa = lm[a], pb = lm[b];
     if(!pa || !pb) return;
@@ -3548,6 +3877,7 @@ function drawSkeleton(lm, ok){
     ctx.lineTo(pb.x*w, pb.y*h);
     ctx.stroke();
   });
+  ctx.setLineDash([]); // i pallini delle articolazioni restano sempre pieni
   ctx.fillStyle = color;
   [11,12,13,14,15,16,23,24,25,26,27,28].forEach(i => {
     const p = lm[i];
@@ -3556,6 +3886,20 @@ function drawSkeleton(lm, ok){
     ctx.arc(p.x*w, p.y*h, 5, 0, Math.PI*2);
     ctx.fill();
   });
+
+  const nose = lm[0];
+  if(nose){
+    const cx = nose.x*w, cy = nose.y*h - 30;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 12, 0, Math.PI*2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.fillStyle = '#0b0f0d';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(ok ? '✓' : '✗', cx, cy + 1);
+  }
 }
 
 function setStatus(ok, msg){
@@ -3593,7 +3937,10 @@ function renderLoop(){
   const lm = smoothedLm;
   wlm = smoothedWlm;
 
-  if(isResting) return; // durante il riposo non valutiamo l'esercizio, la fotocamera resta solo in anteprima
+  if(isResting){
+    lastActiveTick = performance.now(); // il riposo non deve contare come tempo sotto sforzo per la stima calorie
+    return; // durante il riposo non valutiamo l'esercizio, la fotocamera resta solo in anteprima
+  }
 
   if(appState === 'calibrating'){
     if(hasPerson){
@@ -3667,6 +4014,7 @@ function renderLoop(){
       const failedCheck = CALIB_CHECKS.find(c => !framingCheck.states[c.key]);
       setStatus(false, 'Inquadratura non valida' + (failedCheck ? ' — manca: ' + failedCheck.label.toLowerCase() : '') + '. Correggi la posizione.');
       lastTimerTick = performance.now();
+      lastActiveTick = performance.now();
       if(framingBadSince == null){
         framingBadSince = performance.now();
       } else if(performance.now() - framingBadSince > FRAMING_GRACE_MS){
@@ -3681,12 +4029,21 @@ function renderLoop(){
       drawSkeleton(lm, false);
       setStatus(false, 'Ti sei girato verso la fotocamera: rimani di lato per una lettura affidabile.');
       lastTimerTick = performance.now();
+      lastActiveTick = performance.now();
       return;
     }
 
     const evalResult = ex.evaluate(lm);
 
     if(evalResult){
+      // Tempo effettivo sotto sforzo su questo esercizio, indipendentemente
+      // dalla correttezza della forma (si bruciano calorie comunque): usato
+      // solo per la stima calorie, non per il traguardo "tenuta corretta"
+      // qui sotto, che resta legato solo a evalResult.ok.
+      const activeTickNow = performance.now();
+      activeElapsedMs += activeTickNow - lastActiveTick;
+      lastActiveTick = activeTickNow;
+
       drawSkeleton(lm, evalResult.ok);
       setStatus(evalResult.ok, evalResult.statusMsg);
       announceRealtimeIssue(evalResult);
@@ -3719,6 +4076,7 @@ function renderLoop(){
   } else {
     setStatus(false, 'Nessuna persona rilevata — posizionati nell\'inquadratura');
     lastTimerTick = performance.now();
+    lastActiveTick = performance.now();
     if(framingBadSince == null){
       framingBadSince = performance.now();
     } else if(performance.now() - framingBadSince > FRAMING_GRACE_MS){
