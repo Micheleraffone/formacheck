@@ -3121,9 +3121,43 @@ function hasCurrentActivity(){
   return ex.mode === 'reps' ? (repCount > 0 || invalidRepCount > 0) : timerSeconds >= 3;
 }
 
+// Azzera: interrompe del tutto la sessione (fotocamera compresa), non solo il
+// conteggio, e riporta l'app allo stato iniziale — da lì si può di nuovo
+// scegliere liberamente tra esercizio singolo e circuito.
+function stopSession(){
+  resetMetrics();
+
+  clearInterval(restIntervalId);
+  isResting = false;
+  restOverlay.style.display = 'none';
+  circuitActive = false;
+  circuitIntroOverlay.style.display = 'none';
+  circuitProgressNote.style.display = 'none';
+  circuitCancelBtn.style.display = 'none';
+
+  running = false;
+  stopCameraStream();
+  lastVideoTime = -1;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  appState = 'idle';
+  calibOverlay.style.display = 'none';
+  recalibBtn.style.display = 'none';
+  loadingOverlay.style.display = 'none';
+  repCounter.style.display = 'none';
+  timerCounter.style.display = 'none';
+  fpsBadge.textContent = '— fps';
+  setStatus(false, 'In attesa della fotocamera');
+  updateThresholdCalibStatus();
+
+  startBtn.disabled = false;
+  startBtn.textContent = appMode === 'circuit' ? 'Avvia circuito' : 'Avvia fotocamera';
+  resetBtn.disabled = true;
+}
+
 resetBtn.addEventListener('click', () => {
-  if(hasCurrentActivity()) showSessionSummary(resetMetrics);
-  else resetMetrics();
+  if(hasCurrentActivity()) showSessionSummary(stopSession);
+  else stopSession();
 });
 
 // Riepilogo di fine sessione per un singolo esercizio: percentuale di
