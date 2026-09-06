@@ -1279,27 +1279,47 @@ function repTooFast(phaseStartTime){
 // minimo di persistenza evita falsi allarmi per un singolo fotogramma
 // rumoroso; una volta avvisato, tace finché la forma non torna corretta e
 // poi scorretta di nuovo, per non ripetere lo stesso avviso a raffica.
+//
+// Simmetricamente, per gli esercizi a tenuta (plank, plank laterale, sedia a
+// muro) la forma corretta non richiede una "ripetizione" che la confermi
+// come per gli esercizi a ripetizioni (dove ogni rep valida viene annunciata
+// da completeRep) — senza un avviso a parte, chi tiene la posizione
+// correttamente non sentirebbe mai nulla e dovrebbe guardare lo schermo per
+// esserne sicuro. Un annuncio periodico "posizione corretta, non muoverti"
+// mentre la tenuta è corretta copre lo stesso bisogno: non serve guardare il
+// telefono né quando si sbaglia né quando si sta facendo bene.
 let realtimeIssueSince = null;
 let realtimeIssueAnnounced = false;
 const REALTIME_ISSUE_MIN_MS = 350;
+let lastHoldOkAnnounce = 0;
+const HOLD_OK_ANNOUNCE_MS = 6000;
 
 function announceRealtimeIssue(evalResult){
   if(evalResult.ok){
     realtimeIssueSince = null;
     realtimeIssueAnnounced = false;
+    const ex = EXERCISES[currentExercise];
+    if(ex && ex.mode === 'timer'){
+      const now = performance.now();
+      if(now - lastHoldOkAnnounce >= HOLD_OK_ANNOUNCE_MS){
+        lastHoldOkAnnounce = now;
+        pushFeedback('Posizione corretta, non muoverti.', true);
+      }
+    }
     return;
   }
   const now = performance.now();
   if(realtimeIssueSince == null) realtimeIssueSince = now;
   if(!realtimeIssueAnnounced && now - realtimeIssueSince >= REALTIME_ISSUE_MIN_MS){
     realtimeIssueAnnounced = true;
-    if(voiceEnabled) pushFeedback(evalResult.statusMsg, false);
+    pushFeedback(evalResult.statusMsg, false);
   }
 }
 
 function resetRealtimeIssueTracking(){
   realtimeIssueSince = null;
   realtimeIssueAnnounced = false;
+  lastHoldOkAnnounce = 0;
 }
 
 // --- feedback vocale ---
@@ -2364,7 +2384,7 @@ const EXERCISES = {
         const invalidParts = tooFast
           ? 'Movimento troppo rapido o instabile: torsione non conteggiata.'
           : rejectRepSequence('Tieni le mani più basse, vicino all\'addome.');
-        completeRep(tooFast || handsTooHigh, invalidParts);
+        completeRep(tooFast || handsTooHigh, invalidParts, 'Torsione completa, buon controllo.');
 
         const totalReps = exState.leftCount + exState.rightCount;
         if(exState.leftCount >= 3 && exState.rightCount >= 3 && totalReps - exState.asymWarnedAt >= 6){
@@ -2412,7 +2432,7 @@ const EXERCISES = {
         exState.phaseStart = performance.now();
       } else if(exState.phase === 'near' && dist > 0.28){
         exState.phase = 'far';
-        completeRep(repTooFast(exState.phaseStart), 'Movimento troppo rapido o instabile: ripetizione non conteggiata.');
+        completeRep(repTooFast(exState.phaseStart), 'Movimento troppo rapido o instabile: ripetizione non conteggiata.', 'Ciclo pedalata completo, bacino stabile.');
       }
 
       return {
@@ -2467,7 +2487,7 @@ const EXERCISES = {
           exState.phase = 'down';
           if(exState.peakSide === 'sinistro'){ exState.leftSum += exState.peakRaise; exState.leftCount++; }
           else { exState.rightSum += exState.peakRaise; exState.rightCount++; }
-          completeRep(repTooFast(exState.phaseStart), 'Movimento troppo rapido o instabile: ripetizione non conteggiata.');
+          completeRep(repTooFast(exState.phaseStart), 'Movimento troppo rapido o instabile: ripetizione non conteggiata.', 'Buon ritmo, ginocchio in alto.');
 
           // Confronto solo dopo almeno 3 sollevamenti per lato, e non più
           // spesso di una volta ogni 6 ripetizioni: un'unica gamba un po'
