@@ -690,6 +690,11 @@
       <div class="rest-countdown" id="restCountdown">60</div>
       <button class="calib-skip" id="restSkipBtn">Salta riposo</button>
     </div>
+    <div class="calib-overlay" id="pauseOverlay" style="display:none;">
+      <div class="calib-title">⏸ In pausa</div>
+      <div class="calib-hint">Di' "riprendi" o tocca il pulsante per continuare.</div>
+      <button class="btn primary" id="resumeBtn" style="padding:10px 22px;">Riprendi</button>
+    </div>
     <div class="calib-overlay" id="circuitIntroOverlay" style="display:none;">
       <div class="calib-title">Prossimo esercizio</div>
       <div class="view-badge-icon" id="circuitIntroIcon" style="font-size:32px;">◐</div>
@@ -847,6 +852,12 @@
       <button class="btn" id="captionsBtn" style="width:100%;">💬 Sottotitoli disattivati — tocca per attivare</button>
     </div>
 
+    <div>
+      <div class="section-label">Comando vocale</div>
+      <button class="btn" id="voiceCommandBtn" style="width:100%;">🎙️ Comando vocale disattivato — tocca per attivare</button>
+      <div class="calib-status-note" id="voiceCommandHint" style="display:none; margin-top:8px;">Di' "avanti" per passare all'esercizio successivo nel circuito, "salta" per saltare il riposo, "pausa"/"riprendi" per fermarti e ripartire — senza toccare lo schermo.</div>
+    </div>
+
     <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
 
     <div class="controls">
@@ -951,6 +962,8 @@ const camButtons = document.querySelectorAll('.cam-btn[data-facing]');
 const voiceBtn = document.getElementById('voiceBtn');
 const captionsBtn = document.getElementById('captionsBtn');
 const captionOverlay = document.getElementById('captionOverlay');
+const voiceCommandBtn = document.getElementById('voiceCommandBtn');
+const voiceCommandHint = document.getElementById('voiceCommandHint');
 
 const modeSelect = document.getElementById('modeSelect');
 const singleModeSection = document.getElementById('singleModeSection');
@@ -966,6 +979,8 @@ const restOverlay = document.getElementById('restOverlay');
 const restNextLabel = document.getElementById('restNextLabel');
 const restCountdown = document.getElementById('restCountdown');
 const restSkipBtn = document.getElementById('restSkipBtn');
+const pauseOverlay = document.getElementById('pauseOverlay');
+const resumeBtn = document.getElementById('resumeBtn');
 const circuitIntroOverlay = document.getElementById('circuitIntroOverlay');
 const circuitIntroIcon = document.getElementById('circuitIntroIcon');
 const circuitIntroLabel = document.getElementById('circuitIntroLabel');
@@ -1097,6 +1112,7 @@ let restRemaining = 0;
 let restIntervalId = null;
 let restOnComplete = null;
 let isResting = false;
+let isPaused = false; // messo in pausa dall'utente (tocco o comando vocale "pausa"): nessuna valutazione, camera solo in anteprima
 let circuitList = []; // [{key, target}]
 let circuitIndex = 0;
 let circuitActive = false;
@@ -1413,6 +1429,7 @@ function pumpSpeechQueue(){
     forceFinishSpeech = null;
     speechBusy = false;
     livingUtterances = livingUtterances.filter(u => u !== utter);
+    syncRecognition(); // il vocale ha finito di parlare: il microfono del comando vocale può riascoltare
     pumpSpeechQueue(); // solo ora, a frase davvero conclusa (o forzata), si passa alla prossima in coda
   };
   utter.onerror = (e) => { console.warn('Sintesi vocale non riuscita:', e.error); finishAndAdvance(); };
@@ -1421,6 +1438,7 @@ function pumpSpeechQueue(){
 
   livingUtterances.push(utter);
   speechBusy = true;
+  syncRecognition(); // mette in pausa l'ascolto del comando vocale mentre l'app stessa parla
   // Se entro questo tempo (stimato sulla lunghezza del testo, con ampio
   // margine) non arriva nessuna conferma di fine, si sblocca comunque la
   // coda: meglio saltare una frase che restare mute per il resto della sessione.
@@ -1460,6 +1478,7 @@ function clearSpeechQueue(){
   livingUtterances = [];
   if(speechWatchdog){ clearTimeout(speechWatchdog); speechWatchdog = null; }
   forceFinishSpeech = null;
+  syncRecognition();
   try{ window.speechSynthesis.cancel(); } catch(e){ /* sintesi non disponibile */ }
 }
 
@@ -1585,6 +1604,143 @@ captionsBtn.addEventListener('click', () => {
   updateCaptionsBtn();
   try{ localStorage.setItem(CAPTIONS_STORAGE_KEY, captionsEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
   if(!captionsEnabled) clearCaptionQueue();
+});
+
+// --- pausa/ripresa (a tocco o a comando vocale) ---
+function pauseSession(){
+  if(isPaused || isResting || appState !== 'active') return;
+  isPaused = true;
+  pauseOverlay.style.display = 'flex';
+  setStatus(false, 'In pausa');
+  pushFeedback('Allenamento in pausa.', true);
+}
+function resumeSession(){
+  if(!isPaused) return;
+  isPaused = false;
+  pauseOverlay.style.display = 'none';
+  lastTimerTick = performance.now();
+  lastActiveTick = performance.now();
+  setStatus(true, 'Rilevamento attivo');
+  pushFeedback('Si riparte.', true);
+}
+resumeBtn.addEventListener('click', resumeSession);
+
+// --- comando vocale ---
+// Riconoscimento vocale (Web Speech API, distinta dalla sintesi già usata
+// per il feedback) per controllare l'app senza toccare lo schermo a metà
+// esercizio: "avanti" per passare al prossimo esercizio del circuito,
+// "salta" per saltare il riposo, "pausa"/"riprendi" per fermarsi e
+// ripartire. Non è supportato ovunque (in particolare non su Firefox e su
+// Safari desktop) — si disattiva da sé quando manca.
+const VOICE_COMMAND_STORAGE_KEY = 'formacheck_voicecmd_v1';
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+const voiceCommandSupported = !!SpeechRecognitionCtor;
+let voiceCommandEnabled = false;
+try{ voiceCommandEnabled = voiceCommandSupported && localStorage.getItem(VOICE_COMMAND_STORAGE_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
+let recognition = null;
+let recognitionListening = false;
+let recognitionDeniedWarned = false;
+
+function updateVoiceCommandBtn(){
+  if(!voiceCommandSupported){
+    voiceCommandBtn.disabled = true;
+    voiceCommandBtn.textContent = '🎙️ Comando vocale non supportato su questo browser';
+    voiceCommandHint.style.display = 'none';
+    return;
+  }
+  voiceCommandBtn.textContent = voiceCommandEnabled
+    ? '🎙️ Comando vocale attivo — tocca per disattivare'
+    : '🎙️ Comando vocale disattivato — tocca per attivare';
+  voiceCommandBtn.classList.toggle('primary', voiceCommandEnabled);
+  voiceCommandHint.style.display = voiceCommandEnabled ? 'block' : 'none';
+}
+updateVoiceCommandBtn();
+
+// Il microfono deve ascoltare solo quando ha senso farlo: l'utente lo ha
+// attivato, la sessione è avviata, e — soprattutto — l'app non sta essa
+// stessa parlando in quel momento (altrimenti rischierebbe di "sentire" il
+// proprio feedback vocale dagli altoparlanti e scambiarlo per un comando:
+// alcune frasi di correzione contengono parole come "avanti").
+function shouldListenForCommands(){
+  return voiceCommandEnabled && running && !speechBusy;
+}
+
+function ensureRecognition(){
+  if(recognition) return recognition;
+  recognition = new SpeechRecognitionCtor();
+  recognition.lang = 'it-IT';
+  recognition.continuous = true;
+  recognition.interimResults = false;
+  recognition.onresult = (e) => {
+    for(let i = e.resultIndex; i < e.results.length; i++){
+      const res = e.results[i];
+      if(res.isFinal) handleVoiceCommand(res[0].transcript);
+    }
+  };
+  recognition.onerror = (e) => {
+    if(e.error === 'not-allowed' || e.error === 'service-not-allowed'){
+      voiceCommandEnabled = false;
+      updateVoiceCommandBtn();
+      try{ localStorage.setItem(VOICE_COMMAND_STORAGE_KEY, '0'); } catch(err){ /* storage non disponibile */ }
+      if(!recognitionDeniedWarned){
+        recognitionDeniedWarned = true;
+        pushFeedback('Microfono non autorizzato: il comando vocale resta disattivato.', false);
+      }
+    }
+    // altri errori ("no-speech", "aborted", ecc.) sono normali durante un
+    // ascolto continuo: onend gestisce comunque il riavvio quando serve.
+  };
+  recognition.onend = () => {
+    recognitionListening = false;
+    if(shouldListenForCommands()) syncRecognition();
+  };
+  return recognition;
+}
+
+// Riconcilia l'ascolto vero con quello che dovrebbe accadere ora. Va
+// richiamata a ogni cambiamento rilevante (attivazione/disattivazione,
+// avvio/stop sessione, inizio/fine di una frase pronunciata dall'app).
+function syncRecognition(){
+  if(!voiceCommandSupported) return;
+  const want = shouldListenForCommands();
+  if(want && !recognitionListening){
+    try{
+      ensureRecognition().start();
+      recognitionListening = true;
+    } catch(e){ /* già in ascolto o non disponibile in questo istante: onend/onerror rimediano da soli */ }
+  } else if(!want && recognitionListening){
+    try{ recognition.stop(); } catch(e){ /* ignora */ }
+  }
+}
+
+function normalizeSpeech(text){
+  return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+}
+
+// Ogni comando è una parola chiave con "confine di parola" (\b), per non
+// scattare su una sottostringa dentro un'altra parola, e un'azione che si
+// applica solo se ha senso nel contesto attuale (es. "salta" conta solo
+// durante il riposo) — così anche un falso riconoscimento resta innocuo.
+const VOICE_COMMANDS = [
+  { re: /\b(riprendi|continua)\b/, action: () => { if(isPaused) resumeSession(); } },
+  { re: /\bpausa\b/, action: () => { if(!isPaused) pauseSession(); } },
+  { re: /\bsalta\b/, action: () => { if(isResting) skipRestTimer(); } },
+  { re: /\bavanti\b/, action: () => { if(circuitActive && !isResting && !isPaused) triggerCircuitAdvance(); } }
+];
+
+function handleVoiceCommand(rawText){
+  const text = normalizeSpeech(rawText);
+  for(const cmd of VOICE_COMMANDS){
+    if(cmd.re.test(text)){ cmd.action(); return; }
+  }
+}
+
+voiceCommandBtn.addEventListener('click', () => {
+  if(!voiceCommandSupported) return;
+  voiceCommandEnabled = !voiceCommandEnabled;
+  updateVoiceCommandBtn();
+  try{ localStorage.setItem(VOICE_COMMAND_STORAGE_KEY, voiceCommandEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
+  syncRecognition();
 });
 
 // --- registro esercizi ---
@@ -3507,12 +3663,15 @@ function stopSession(){
   clearInterval(restIntervalId);
   isResting = false;
   restOverlay.style.display = 'none';
+  isPaused = false;
+  pauseOverlay.style.display = 'none';
   circuitActive = false;
   circuitIntroOverlay.style.display = 'none';
   circuitProgressNote.style.display = 'none';
   circuitCancelBtn.style.display = 'none';
 
   running = false;
+  syncRecognition(); // ferma l'ascolto dei comandi vocali insieme alla sessione
   stopCameraStream();
   lastVideoTime = -1;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -3948,6 +4107,12 @@ function renderLoop(){
     return; // durante il riposo non valutiamo l'esercizio, la fotocamera resta solo in anteprima
   }
 
+  if(isPaused){
+    lastTimerTick = performance.now();
+    lastActiveTick = performance.now();
+    return; // in pausa: fotocamera in anteprima, nessuna valutazione né conteggio
+  }
+
   if(appState === 'calibrating'){
     if(hasPerson){
       const { states, allPass } = checkCalibration(lm);
@@ -4185,6 +4350,7 @@ startBtn.addEventListener('click', async () => {
   resetBtn.disabled = false;
   startBtn.textContent = 'In esecuzione';
   startBtn.disabled = true;
+  syncRecognition(); // avvia l'ascolto dei comandi vocali, se attivati
   renderLoop();
 
   if(appMode === 'circuit'){
