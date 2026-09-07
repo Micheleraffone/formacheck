@@ -765,7 +765,9 @@
       <div class="exercise-select" id="modeSelect" style="grid-template-columns:1fr 1fr;">
         <button class="ex-btn active" data-mode="single">Singolo esercizio</button>
         <button class="ex-btn" data-mode="circuit">Circuito</button>
+        <button class="ex-btn" data-mode="auto" style="grid-column:1 / -1;">🤖 Rilevamento automatico</button>
       </div>
+      <div class="calib-status-note" id="autoModeHint" style="display:none; margin-top:8px;">Non serve scegliere l'esercizio: inizia a muoverti e l'app riconosce da sola cosa stai facendo, passando automaticamente alla valutazione giusta. Copre 8 esercizi (squat, affondo, flessioni, plank, jumping jack, mountain climber, ponte glutei, ginocchia alte) — gli altri restano selezionabili solo dalle altre due modalità. È un riconoscimento euristico, non perfetto: se sbaglia, seleziona l'esercizio a mano dalla modalità "Singolo esercizio".</div>
     </div>
 
     <div id="singleModeSection">
@@ -783,6 +785,7 @@
     </div>
 
     <div class="calib-status-note" id="recordBadge" style="display:none; text-align:center;"></div>
+    <div class="calib-status-note" id="recurringErrorBadge" style="display:none; text-align:center; color:var(--warn);"></div>
 
     <div class="howto-panel">
       <button class="howto-toggle" id="howtoToggle" aria-expanded="false">
@@ -867,6 +870,11 @@
     <button class="btn" id="recalibBtn" style="display:none;">Ricalibra posizione</button>
     <button class="btn" id="thresholdCalibBtn" style="display:none;">Taratura soglie personalizzata</button>
     <div class="calib-status-note" id="thresholdCalibStatus" style="display:none;"></div>
+    <div class="calib-status-note" id="recalibSuggestBadge" style="display:none;">
+      💡 Precisione altissima nelle ultime sessioni: la tua tecnica sembra migliorata. Vuoi ricalibrare le soglie per una sfida più precisa?
+      <button class="calib-skip" id="recalibSuggestBtn" style="display:block; margin:6px auto 0;">Ricalibra ora</button>
+    </div>
+    <button class="btn" id="refPoseBtn" style="display:none;">👤 Postura di riferimento disattivata — tocca per attivare</button>
     <button class="btn" id="restBtn" style="display:none;">Inizia riposo</button>
     <button class="btn" id="circuitCancelBtn" style="display:none;">Termina circuito</button>
 
@@ -953,6 +961,9 @@ const calibSkip = document.getElementById('calibSkip');
 const recalibBtn = document.getElementById('recalibBtn');
 const thresholdCalibBtn = document.getElementById('thresholdCalibBtn');
 const thresholdCalibStatus = document.getElementById('thresholdCalibStatus');
+const recalibSuggestBadge = document.getElementById('recalibSuggestBadge');
+const recalibSuggestBtn = document.getElementById('recalibSuggestBtn');
+const refPoseBtn = document.getElementById('refPoseBtn');
 const thresholdCalibOverlay = document.getElementById('thresholdCalibOverlay');
 const thresholdCalibStepLabel = document.getElementById('thresholdCalibStepLabel');
 const thresholdCalibPrompt = document.getElementById('thresholdCalibPrompt');
@@ -968,6 +979,7 @@ const voiceCommandHint = document.getElementById('voiceCommandHint');
 const modeSelect = document.getElementById('modeSelect');
 const singleModeSection = document.getElementById('singleModeSection');
 const circuitBuilder = document.getElementById('circuitBuilder');
+const autoModeHint = document.getElementById('autoModeHint');
 const circuitListEl = document.getElementById('circuitList');
 const savedProgramsList = document.getElementById('savedProgramsList');
 const saveProgramBtn = document.getElementById('saveProgramBtn');
@@ -994,6 +1006,7 @@ const sessionSummaryBody = document.getElementById('sessionSummaryBody');
 const sessionSummaryShareBtn = document.getElementById('sessionSummaryShareBtn');
 const sessionSummaryCloseBtn = document.getElementById('sessionSummaryCloseBtn');
 const recordBadge = document.getElementById('recordBadge');
+const recurringErrorBadge = document.getElementById('recurringErrorBadge');
 const historyBtn = document.getElementById('historyBtn');
 const historyOverlay = document.getElementById('historyOverlay');
 const streakBadge = document.getElementById('streakBadge');
@@ -1113,6 +1126,7 @@ let restIntervalId = null;
 let restOnComplete = null;
 let isResting = false;
 let isPaused = false; // messo in pausa dall'utente (tocco o comando vocale "pausa"): nessuna valutazione, camera solo in anteprima
+let announcedRecurringFor = new Set(); // esercizi per cui il pattern ricorrente è già stato annunciato a voce in questa sessione
 let circuitList = []; // [{key, target}]
 let circuitIndex = 0;
 let circuitActive = false;
@@ -1228,6 +1242,11 @@ function handleGoalReached(achievedLabel){
 // array di frasi: vengono mostrate insieme nella lista feedback ma pronunciate
 // una dopo l'altra in coda, senza sovrapporsi né interrompersi a vicenda.
 function completeRep(hadIssue, invalidMsg, validMsg){
+  // exState.phaseStart segna sempre l'inizio della fase conteggiata (ogni
+  // esercizio a ripetizioni lo imposta prima di chiamare completeRep), quindi
+  // qui è già disponibile la durata dell'intera ripetizione appena conclusa,
+  // senza che ciascun esercizio debba calcolarla e passarla esplicitamente.
+  const repDurationMs = exState.phaseStart != null ? performance.now() - exState.phaseStart : null;
   if(hadIssue){
     invalidRepCount++;
     const parts = Array.isArray(invalidMsg) ? invalidMsg : [invalidMsg || 'Ripetizione non conteggiata: correggi la forma e riprova.'];
@@ -1236,8 +1255,25 @@ function completeRep(hadIssue, invalidMsg, validMsg){
     pushFeedbackSequence(parts, false);
   } else {
     incrementRep();
+    checkRepTempo(repDurationMs);
     if(validMsg) pushFeedback(validMsg, true);
   }
+}
+
+// Rileva quando l'utente accelera bruscamente rispetto al proprio ritmo
+// abituale su QUESTO esercizio — un segnale di scatti/perdita di controllo
+// diverso dal controllo "troppo veloce per essere reale" già esistente
+// (quello usa una soglia fissa assoluta, questo si adatta al ritmo di
+// ciascuno). La media si azzera a ogni cambio esercizio/serie insieme al
+// resto di exState, quindi non confronta mai ritmi di esercizi diversi.
+const REP_TEMPO_MIN_SAMPLES = 3; // sotto queste ripetizioni non c'è ancora un ritmo di riferimento affidabile
+function checkRepTempo(durationMs){
+  if(durationMs == null) return;
+  if(exState.repTempoEma != null && (exState.repTempoSamples || 0) >= REP_TEMPO_MIN_SAMPLES && durationMs < exState.repTempoEma * 0.45){
+    pushFeedback('Stai accelerando rispetto al tuo ritmo abituale: rallenta e controlla il movimento.', false);
+  }
+  exState.repTempoSamples = (exState.repTempoSamples || 0) + 1;
+  exState.repTempoEma = exState.repTempoEma == null ? durationMs : exState.repTempoEma * 0.7 + durationMs * 0.3;
 }
 
 // Il motivo di scarto più frequente nella sessione corrente (per il riepilogo).
@@ -2802,20 +2838,22 @@ function loadSavedThresholds(){
     if(!raw) return;
     const saved = JSON.parse(raw);
     Object.keys(saved).forEach(key => {
-      if(EXERCISES[key] && EXERCISES[key].thresholds && saved[key] && saved[key].thresholds){
+      if(!EXERCISES[key] || !saved[key]) return;
+      if(EXERCISES[key].thresholds && saved[key].thresholds){
         Object.assign(EXERCISES[key].thresholds, saved[key].thresholds);
       }
+      if(saved[key].refPose) EXERCISES[key].refPose = saved[key].refPose;
     });
   } catch(e){
     // localStorage non disponibile (es. modalità privata) o dati corrotti: si prosegue con le soglie di default
   }
 }
 
-function saveThresholds(key){
+function saveThresholds(key, refPose){
   try{
     const raw = localStorage.getItem(THRESH_STORAGE_KEY);
     const saved = raw ? JSON.parse(raw) : {};
-    saved[key] = { thresholds: EXERCISES[key].thresholds, calibratedAt: new Date().toISOString() };
+    saved[key] = { thresholds: EXERCISES[key].thresholds, calibratedAt: new Date().toISOString(), refPose: refPose || (saved[key] && saved[key].refPose) };
     localStorage.setItem(THRESH_STORAGE_KEY, JSON.stringify(saved));
   } catch(e){
     // storage non disponibile: le soglie personalizzate restano valide solo per questa sessione
@@ -2874,7 +2912,12 @@ function logSessionIfActive(){
     valid: repCount,
     invalid: invalidRepCount,
     seconds: Math.round(timerSeconds),
-    activeMs: Math.round(activeElapsedMs)
+    activeMs: Math.round(activeElapsedMs),
+    // motivo di scarto -> quante volte, in QUESTA sessione: permette di
+    // rilevare pattern ricorrenti su più sessioni (vedi
+    // getRecurringErrorPattern), non solo il "più frequente" della sessione
+    // corrente mostrato nel riepilogo a fine allenamento.
+    errorTally: Object.keys(sessionErrorTally).length ? sessionErrorTally : undefined
   });
 }
 
@@ -2887,13 +2930,18 @@ function aggregateHistory(){
     const dateStr = new Date(e.ts).toLocaleDateString('it-IT');
     const mapKey = dateStr + '|' + e.key;
     if(!map.has(mapKey)){
-      map.set(mapKey, { dateStr, key: e.key, label: e.label, mode: e.mode, valid: 0, invalid: 0, seconds: 0, ts: e.ts });
+      map.set(mapKey, { dateStr, key: e.key, label: e.label, mode: e.mode, valid: 0, invalid: 0, seconds: 0, ts: e.ts, errorTally: {} });
     }
     const agg = map.get(mapKey);
     agg.valid += e.valid || 0;
     agg.invalid += e.invalid || 0;
     agg.seconds += e.seconds || 0;
     agg.ts = Math.max(agg.ts, e.ts);
+    if(e.errorTally){
+      Object.keys(e.errorTally).forEach(reason => {
+        agg.errorTally[reason] = (agg.errorTally[reason] || 0) + e.errorTally[reason];
+      });
+    }
   });
   return [...map.values()].sort((a, b) => b.ts - a.ts);
 }
@@ -2918,12 +2966,56 @@ function updateRecordBadge(){
   const rec = getPersonalRecord(currentExercise);
   if(!rec){
     recordBadge.style.display = 'none';
+  } else {
+    recordBadge.style.display = 'block';
+    recordBadge.textContent = rec.mode === 'reps'
+      ? ('🏆 Record personale: ' + rec.value + ' ripetizioni in un giorno')
+      : ('🏆 Record personale: ' + formatRestTime(rec.value) + ' in tenuta corretta');
+  }
+  updateRecurringErrorBadge();
+}
+
+// --- pattern di errore ricorrenti ---
+// Se lo stesso errore di forma è il motivo di scarto principale in più
+// sessioni recenti (non solo in quella di oggi), lo segnala come tendenza
+// fin da quando si seleziona l'esercizio — non serve rifare lo stesso
+// errore per sentirselo dire di nuovo ogni volta a ripetizione, lo si sa
+// già prima di iniziare.
+const RECURRING_ERROR_SESSIONS = 5; // quante sessioni recenti (per giorno) considerare
+const RECURRING_ERROR_MIN_SESSIONS_WITH_ISSUE = 2; // in quante deve comparire per contare come tendenza
+const RECURRING_ERROR_MIN_TOTAL = 4; // scarti totali minimi prima di trarre conclusioni
+
+function getRecurringErrorPattern(exerciseKey){
+  const rows = aggregateHistory().filter(r => r.key === exerciseKey).slice(0, RECURRING_ERROR_SESSIONS);
+  const totals = {};
+  const sessionsWithIssue = {};
+  let totalInvalid = 0;
+  rows.forEach(r => {
+    Object.keys(r.errorTally || {}).forEach(reason => {
+      totals[reason] = (totals[reason] || 0) + r.errorTally[reason];
+      sessionsWithIssue[reason] = (sessionsWithIssue[reason] || 0) + 1;
+      totalInvalid += r.errorTally[reason];
+    });
+  });
+  if(totalInvalid < RECURRING_ERROR_MIN_TOTAL) return null;
+  let topReason = null, topCount = 0;
+  Object.keys(totals).forEach(reason => {
+    if(totals[reason] > topCount){ topCount = totals[reason]; topReason = reason; }
+  });
+  if(!topReason) return null;
+  if(sessionsWithIssue[topReason] < RECURRING_ERROR_MIN_SESSIONS_WITH_ISSUE) return null;
+  if(topCount / totalInvalid < 0.4) return null; // non abbastanza dominante rispetto agli altri motivi
+  return topReason;
+}
+
+function updateRecurringErrorBadge(){
+  const pattern = getRecurringErrorPattern(currentExercise);
+  if(!pattern){
+    recurringErrorBadge.style.display = 'none';
     return;
   }
-  recordBadge.style.display = 'block';
-  recordBadge.textContent = rec.mode === 'reps'
-    ? ('🏆 Record personale: ' + rec.value + ' ripetizioni in un giorno')
-    : ('🏆 Record personale: ' + formatRestTime(rec.value) + ' in tenuta corretta');
+  recurringErrorBadge.style.display = 'block';
+  recurringErrorBadge.textContent = '📈 Ultimamente tendi a: ' + pattern;
 }
 
 // --- obiettivi e serie di giorni consecutivi ---
@@ -3039,6 +3131,8 @@ function updateThresholdCalibStatus(){
   if(!ex.calib){
     thresholdCalibBtn.style.display = 'none';
     thresholdCalibStatus.style.display = 'none';
+    recalibSuggestBadge.style.display = 'none';
+    refPoseBtn.style.display = 'none';
     return;
   }
   thresholdCalibBtn.style.display = 'block';
@@ -3051,7 +3145,36 @@ function updateThresholdCalibStatus(){
   } else {
     thresholdCalibStatus.style.display = 'none';
   }
+  recalibSuggestBadge.style.display = getRecalibrationSuggestion(currentExercise) ? 'block' : 'none';
+  recalibSuggestBtn.disabled = appState !== 'active';
+  refPoseBtn.style.display = ex.refPose ? 'block' : 'none';
+  updateRefPoseBtn();
 }
+
+// --- auto-calibrazione progressiva (suggerita, mai automatica in silenzio) ---
+// Non tocchiamo mai le soglie da soli: cambiarle senza che l'utente se ne
+// accorga significherebbe indebolire (o irrigidire) in silenzio i controlli
+// di sicurezza della forma, che sono il punto centrale dell'app. Quello che
+// FACCIAMO in automatico è accorgerci, dallo storico, di quando le soglie
+// attuali sembrano ormai troppo larghe per la tecnica dimostrata di
+// recente, e proporre — mai imporre — di ripetere la taratura.
+function getRecalibrationSuggestion(exerciseKey){
+  const ex = EXERCISES[exerciseKey];
+  if(!ex || !ex.calib) return false;
+  const meta = getSavedMeta(exerciseKey);
+  if(!meta) return false; // senza una calibrazione personalizzata attiva non c'è nulla da proporre di "aggiornare"
+  const calibratedAt = new Date(meta.calibratedAt).getTime();
+  const rows = aggregateHistory()
+    .filter(r => r.key === exerciseKey && r.ts > calibratedAt && (r.valid + r.invalid) >= 5)
+    .slice(0, 5);
+  if(rows.length < 5) return false;
+  return rows.every(r => (r.valid / (r.valid + r.invalid)) >= 0.9);
+}
+
+recalibSuggestBtn.addEventListener('click', () => {
+  if(appState !== 'active') return;
+  startThresholdCalibration();
+});
 
 // --- wizard di taratura soglie personalizzate ---
 const THRESH_HOLD_MS = 2200;
@@ -3095,6 +3218,7 @@ function finishThresholdCalibration(){
     return out;
   });
   const success = ex.calib.apply(avgs, ex.thresholds);
+  const refPose = threshCalib.refPose;
   threshCalib = null;
   thresholdCalibOverlay.style.display = 'none';
   appState = 'active';
@@ -3103,7 +3227,8 @@ function finishThresholdCalibration(){
   if(success === false){
     pushFeedback('Calibrazione non riuscita: il movimento tra i due passi era troppo simile. Riprova assicurandoti di muoverti chiaramente tra le due posizioni.', false);
   } else {
-    saveThresholds(currentExercise);
+    ex.refPose = refPose || ex.refPose;
+    saveThresholds(currentExercise, refPose);
     updateThresholdCalibStatus();
     pushFeedback('Soglie personalizzate salvate per questo esercizio.', true);
   }
@@ -3111,6 +3236,27 @@ function finishThresholdCalibration(){
 
 thresholdCalibBtn.addEventListener('click', startThresholdCalibration);
 thresholdCalibCancel.addEventListener('click', cancelThresholdCalibration);
+
+// Il pulsante "postura di riferimento" compare solo per gli esercizi che
+// hanno già una posa di riferimento salvata (serve prima la taratura
+// soglie); è un confronto visivo puramente opzionale, spento di default.
+const REF_POSE_ENABLED_KEY = 'formacheck_refpose_v1';
+let refPoseEnabled = false;
+try{ refPoseEnabled = localStorage.getItem(REF_POSE_ENABLED_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
+
+function updateRefPoseBtn(){
+  refPoseBtn.textContent = refPoseEnabled
+    ? '👤 Postura di riferimento attiva — tocca per disattivare'
+    : '👤 Postura di riferimento disattivata — tocca per attivare';
+  refPoseBtn.classList.toggle('primary', refPoseEnabled);
+}
+updateRefPoseBtn();
+
+refPoseBtn.addEventListener('click', () => {
+  refPoseEnabled = !refPoseEnabled;
+  updateRefPoseBtn();
+  try{ localStorage.setItem(REF_POSE_ENABLED_KEY, refPoseEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
+});
 
 // --- timer di riposo ---
 function playBeep(){
@@ -3338,6 +3484,7 @@ modeSelect.querySelectorAll('.ex-btn').forEach(btn => {
     appMode = btn.dataset.mode;
     singleModeSection.style.display = appMode === 'single' ? 'block' : 'none';
     circuitBuilder.style.display = appMode === 'circuit' ? 'block' : 'none';
+    autoModeHint.style.display = appMode === 'auto' ? 'block' : 'none';
     startBtn.textContent = appMode === 'circuit' ? 'Avvia circuito' : 'Avvia fotocamera';
     updateGoalUI();
   });
@@ -3659,6 +3806,8 @@ function hasCurrentActivity(){
 // scegliere liberamente tra esercizio singolo e circuito.
 function stopSession(){
   resetMetrics();
+  announcedRecurringFor = new Set();
+  autoDetectState = { candidate: null, since: null, switchCandidate: null, switchSince: null };
 
   clearInterval(restIntervalId);
   isResting = false;
@@ -3940,6 +4089,143 @@ function al(lm){
   return wlm || lm;
 }
 
+// --- rilevamento automatico dell'esercizio (modalità "Rilevamento
+// automatico") ---
+// Un classificatore euristico su angoli/posizioni delle articolazioni, non
+// un modello di machine learning: guarda orientamento del busto, quanto
+// sono piegati ginocchia/gomiti e la posizione di mani/piedi per indovinare
+// quale esercizio si sta facendo. Copre solo gli 8 esercizi geometricamente
+// più distinguibili fra loro; gli altri (burpee, sedia a muro, dip su
+// sedia, plank laterale, russian twist, crunch, bicycle crunch,
+// sollevamento gambe) sono deliberatamente esclusi — troppo simili ad altri
+// nella sola posa, o dipendenti da un oggetto (sedia/muro) invisibile al
+// rilevamento — e restano selezionabili solo dalle altre due modalità.
+const AUTO_DETECT_MIN_VIS = 0.5;
+
+function extractAutoFeatures(lm){
+  const idx = [11,12,13,14,15,16,23,24,25,26,27,28];
+  for(const i of idx){
+    if(!lm[i] || (lm[i].visibility != null && lm[i].visibility < AUTO_DETECT_MIN_VIS)) return null;
+  }
+  const lSh=lm[11], rSh=lm[12], lEl=lm[13], rEl=lm[14], lWr=lm[15], rWr=lm[16];
+  const lHip=lm[23], rHip=lm[24], lKnee=lm[25], rKnee=lm[26], lAnkle=lm[27], rAnkle=lm[28];
+  const shMid = { x:(lSh.x+rSh.x)/2, y:(lSh.y+rSh.y)/2 };
+  const hipMid = { x:(lHip.x+rHip.x)/2, y:(lHip.y+rHip.y)/2 };
+  const torsoAngle = angleFromVertical(shMid, hipMid); // 0° = busto verticale, 90° = orizzontale
+
+  const kneeL = angleBetween(lHip, lKnee, lAnkle);
+  const kneeR = angleBetween(rHip, rKnee, rAnkle);
+  if(kneeL == null || kneeR == null) return null;
+  const kneeMin = Math.min(kneeL, kneeR);
+  const kneeDiff = Math.abs(kneeL - kneeR);
+
+  const elbowL = angleBetween(lSh, lEl, lWr);
+  const elbowR = angleBetween(rSh, rEl, rWr);
+  const elbowMin = (elbowL == null || elbowR == null) ? 180 : Math.min(elbowL, elbowR);
+
+  const shoulderWidth = Math.hypot(lSh.x-rSh.x, lSh.y-rSh.y) || 0.01;
+  const hipWidth = Math.hypot(lHip.x-rHip.x, lHip.y-rHip.y) || 0.01;
+  const wristSep = Math.hypot(lWr.x-rWr.x, lWr.y-rWr.y) / shoulderWidth;
+  const ankleSep = Math.hypot(lAnkle.x-rAnkle.x, lAnkle.y-rAnkle.y) / hipWidth;
+  const wristsUp = lWr.y < shMid.y && rWr.y < shMid.y; // entrambi i polsi sopra le spalle (y minore = più in alto)
+
+  return { torsoAngle, kneeMin, kneeDiff, elbowMin, wristSep, ankleSep, wristsUp };
+}
+
+function classifyExercise(lm){
+  const f = extractAutoFeatures(lm);
+  if(!f) return null;
+  const candidates = [];
+
+  if(f.torsoAngle < 35){
+    // In piedi: affondo (ginocchia molto asimmetriche), ginocchia alte
+    // (asimmetria ancora più marcata e ginocchio guida molto piegato),
+    // jumping jack (braccia sopra le spalle e/o piedi larghi), squat
+    // (ginocchia piegate ma simmetriche).
+    if(f.kneeDiff > 55 && f.kneeMin < 100){
+      candidates.push({ key:'highknees', score: 2 + f.kneeDiff/50 });
+    } else if(f.kneeDiff > 35 && f.kneeMin < 140){
+      candidates.push({ key:'lunge', score: 2 + f.kneeDiff/50 });
+    }
+    if(f.wristsUp && f.ankleSep > 1.3){
+      candidates.push({ key:'jumpingjack', score: 3 });
+    } else if(f.wristsUp || f.ankleSep > 1.6){
+      candidates.push({ key:'jumpingjack', score: 1.4 });
+    }
+    if(f.kneeDiff < 25 && f.kneeMin < 155 && f.kneeMin > 45){
+      candidates.push({ key:'squat', score: 1.5 + (155-f.kneeMin)/120 });
+    }
+  } else if(f.torsoAngle > 55){
+    // Orizzontale (di lato, a terra): mountain climber (ginocchia molto
+    // asimmetriche, una guida in avanti), ponte glutei (ginocchia piegate
+    // ma simmetriche e ferme), altrimenti gambe pressoché dritte — plank o
+    // flessioni, distinti dal piegamento del gomito.
+    if(f.kneeDiff > 40){
+      candidates.push({ key:'mountainclimber', score: 2 + f.kneeDiff/50 });
+    } else if(f.kneeMin < 140){
+      candidates.push({ key:'glutebridge', score: 1.4 });
+    } else if(f.elbowMin < 145){
+      candidates.push({ key:'pushup', score: 1.5 + (145-f.elbowMin)/70 });
+    } else {
+      candidates.push({ key:'plank', score: 1 });
+    }
+  }
+
+  if(candidates.length === 0) return null;
+  candidates.sort((a,b) => b.score - a.score);
+  return candidates[0];
+}
+
+// Stato del rilevamento automatico: candidato attualmente osservato e da
+// quando lo è ininterrottamente, sia per la primissima individuazione
+// (candidate/since) sia per un cambio esercizio durante la sessione
+// (switchCandidate/switchSince, soglia più lunga per non cambiare esercizio
+// per un singolo fotogramma ambiguo mentre se ne sta già valutando uno).
+let autoDetectState = { candidate: null, since: null, switchCandidate: null, switchSince: null };
+const AUTO_DETECT_CONFIRM_MS = 800;
+const AUTO_SWITCH_CONFIRM_MS = 1400;
+
+function enterAutoWaitingState(){
+  appState = 'auto-waiting';
+  autoDetectState = { candidate: null, since: null, switchCandidate: null, switchSince: null };
+  calibOverlay.style.display = 'none';
+  recalibBtn.style.display = 'none';
+  repCounter.style.display = 'none';
+  timerCounter.style.display = 'none';
+  setStatus(false, "In attesa di riconoscere un esercizio… inizia a muoverti.");
+}
+
+function confirmAutoDetection(key){
+  autoDetectState.candidate = null;
+  autoDetectState.since = null;
+  autoDetectState.switchCandidate = null;
+  autoDetectState.switchSince = null;
+  selectExercise(key);
+  enterCalibratingState();
+  pushFeedback('Esercizio riconosciuto: ' + EXERCISES[key].label + '.', true);
+}
+
+// Cambio esercizio automatico mentre se ne sta già valutando uno (per chi
+// passa da un movimento all'altro senza più toccare lo schermo): richiede
+// una conferma più lunga di quella iniziale, per non scattare per un
+// fotogramma ambiguo a metà ripetizione.
+function maybeAutoSwitchExercise(lm, now){
+  const guess = classifyExercise(lm);
+  if(!guess || guess.key === currentExercise){
+    autoDetectState.switchCandidate = null;
+    autoDetectState.switchSince = null;
+    return;
+  }
+  if(autoDetectState.switchCandidate === guess.key){
+    if(now - autoDetectState.switchSince >= AUTO_SWITCH_CONFIRM_MS){
+      confirmAutoDetection(guess.key);
+    }
+  } else {
+    autoDetectState.switchCandidate = guess.key;
+    autoDetectState.switchSince = now;
+  }
+}
+
 // quanto il ginocchio supera la punta del piede lungo la direzione caviglia→punta (in unità di lunghezza del piede)
 function kneeOverToeRatio(ankle, knee, toe){
   if(!ankle || !knee || !toe) return null;
@@ -4016,6 +4302,79 @@ function checkCalibration(lm){
 
   const allPass = Object.values(states).every(Boolean);
   return { states, allPass };
+}
+
+// --- postura di riferimento (overlay) ---
+// Alla fine dell'ultimo passo di taratura soglie (la posizione "corretta" —
+// per lo squat, ad es., lo squat più profondo considerato corretto) si
+// salva anche la posa intera, non solo gli angoli usati per le soglie.
+// Viene normalizzata rispetto al centro anche e alla lunghezza del busto,
+// così può essere ridisegnata in scala e posizione corrette per QUALSIASI
+// inquadratura successiva (persona più vicina/lontana, spostata nel
+// fotogramma), non solo per quella usata durante la calibrazione.
+const REF_POSE_JOINTS = [0,11,12,13,14,15,16,23,24,25,26,27,28];
+function normalizePoseForOverlay(lm){
+  const hipL = lm[23], hipR = lm[24], shL = lm[11], shR = lm[12];
+  if(!hipL || !hipR || !shL || !shR) return null;
+  const hipMidX = (hipL.x + hipR.x) / 2, hipMidY = (hipL.y + hipR.y) / 2;
+  const shMidX = (shL.x + shR.x) / 2, shMidY = (shL.y + shR.y) / 2;
+  const torsoLen = Math.hypot(shMidX - hipMidX, shMidY - hipMidY);
+  if(!torsoLen) return null;
+  const out = {};
+  REF_POSE_JOINTS.forEach(i => {
+    const p = lm[i];
+    if(!p) return;
+    out[i] = { x: (p.x - hipMidX) / torsoLen, y: (p.y - hipMidY) / torsoLen };
+  });
+  return out;
+}
+
+// Disegna la posa di riferimento come scheletro "fantasma" tratteggiato,
+// riproiettato sul centro anche e la scala del busto CORRENTI (non quelli
+// della calibrazione): così appare nella stessa posizione/scala relativa
+// della persona inquadrata ora, qualunque sia la sua distanza dalla
+// fotocamera. Va disegnato prima dello scheletro live, che deve restare
+// sempre il più leggibile dei due.
+function drawReferenceOverlay(lm, refPose){
+  if(!refPose) return;
+  const hipL = lm[23], hipR = lm[24], shL = lm[11], shR = lm[12];
+  if(!hipL || !hipR || !shL || !shR) return;
+  const hipMidX = (hipL.x + hipR.x) / 2, hipMidY = (hipL.y + hipR.y) / 2;
+  const shMidX = (shL.x + shR.x) / 2, shMidY = (shL.y + shR.y) / 2;
+  const torsoLen = Math.hypot(shMidX - hipMidX, shMidY - hipMidY);
+  if(!torsoLen) return;
+  const w = canvas.width, h = canvas.height;
+  const project = (i) => {
+    const p = refPose[i];
+    if(!p) return null;
+    return { x: (hipMidX + p.x * torsoLen) * w, y: (hipMidY + p.y * torsoLen) * h };
+  };
+  const connections = [
+    [11,12],[11,23],[12,24],[23,24],
+    [11,13],[13,15],[12,14],[14,16],
+    [23,25],[25,27],[24,26],[26,28]
+  ];
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = '#c9ff3d';
+  ctx.setLineDash([5, 5]);
+  ctx.lineWidth = 3;
+  connections.forEach(([a,b]) => {
+    const pa = project(a), pb = project(b);
+    if(!pa || !pb) return;
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.stroke();
+  });
+  const head = project(0);
+  if(head){
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(head.x, head.y, 11, 0, Math.PI*2);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawSkeleton(lm, ok){
@@ -4113,6 +4472,29 @@ function renderLoop(){
     return; // in pausa: fotocamera in anteprima, nessuna valutazione né conteggio
   }
 
+  if(appState === 'auto-waiting'){
+    if(hasPerson){
+      drawSkeleton(lm, true);
+      const guess = classifyExercise(lm);
+      if(guess && guess.key === autoDetectState.candidate){
+        const elapsed = now - autoDetectState.since;
+        setStatus(false, 'Riconoscimento in corso: sembra "' + EXERCISES[guess.key].label + '"… (' + Math.min(100, Math.round(elapsed/AUTO_DETECT_CONFIRM_MS*100)) + '%)');
+        if(elapsed >= AUTO_DETECT_CONFIRM_MS) confirmAutoDetection(guess.key);
+      } else {
+        autoDetectState.candidate = guess ? guess.key : null;
+        autoDetectState.since = guess ? now : null;
+        setStatus(false, guess ? ('Riconoscimento in corso: sembra "' + EXERCISES[guess.key].label + '"…') : "In attesa di riconoscere un esercizio… inizia a muoverti.");
+      }
+    } else {
+      autoDetectState.candidate = null;
+      autoDetectState.since = null;
+      setStatus(false, 'Nessuna persona rilevata — posizionati nell\'inquadratura');
+    }
+    return;
+  }
+
+  if(appMode === 'auto' && hasPerson) maybeAutoSwitchExercise(lm, now);
+
   if(appState === 'calibrating'){
     if(hasPerson){
       const { states, allPass } = checkCalibration(lm);
@@ -4151,6 +4533,13 @@ function renderLoop(){
         thresholdCalibBar.style.width = Math.min(100, (elapsed/THRESH_HOLD_MS)*100) + '%';
         if(elapsed >= THRESH_HOLD_MS){
           threshCalib.results.push(threshCalib.stepSamples);
+          // L'ultimo passo di calibrazione è la posizione "corretta" di
+          // riferimento (per lo squat, ad es., lo squat più profondo
+          // considerato corretto): ne salviamo anche la posa completa, non
+          // solo gli angoli, per poterla ridisegnare in overlay più avanti.
+          if(threshCalib.stepIndex === ex.calib.steps.length - 1){
+            threshCalib.refPose = normalizePoseForOverlay(lm);
+          }
           threshCalib.stepIndex++;
           if(threshCalib.stepIndex >= ex.calib.steps.length){
             finishThresholdCalibration();
@@ -4215,6 +4604,7 @@ function renderLoop(){
       activeElapsedMs += activeTickNow - lastActiveTick;
       lastActiveTick = activeTickNow;
 
+      if(refPoseEnabled) drawReferenceOverlay(lm, ex.refPose);
       drawSkeleton(lm, evalResult.ok);
       setStatus(evalResult.ok, evalResult.statusMsg);
       announceRealtimeIssue(evalResult);
@@ -4266,6 +4656,16 @@ function enterActiveState(){
   framingBadSince = null;
   setStatus(true, 'Rilevamento attivo');
   updateThresholdCalibStatus();
+
+  // Il pattern ricorrente si annuncia a voce una sola volta per esercizio in
+  // questa sessione (non a ogni ricalibrazione di posizione durante lo
+  // stesso allenamento): il badge nel pannello resta comunque sempre
+  // visibile per la consultazione.
+  if(!announcedRecurringFor.has(currentExercise)){
+    announcedRecurringFor.add(currentExercise);
+    const pattern = getRecurringErrorPattern(currentExercise);
+    if(pattern) pushFeedback('Ultimamente tendi a: ' + pattern, false);
+  }
 }
 
 function enterCalibratingState(){
@@ -4355,6 +4755,8 @@ startBtn.addEventListener('click', async () => {
 
   if(appMode === 'circuit'){
     startCircuit();
+  } else if(appMode === 'auto'){
+    enterAutoWaitingState();
   } else {
     repCounter.style.display = EXERCISES[currentExercise].mode === 'reps' ? 'flex' : 'none';
     timerCounter.style.display = EXERCISES[currentExercise].mode === 'timer' ? 'block' : 'none';
