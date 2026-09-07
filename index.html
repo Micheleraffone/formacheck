@@ -771,10 +771,15 @@
   <div class="panel">
     <div>
       <div class="section-label">Modalità</div>
-      <div class="exercise-select" id="modeSelect" style="grid-template-columns:1fr 1fr;">
+      <div class="exercise-select" id="modeSelect" style="grid-template-columns:1fr 1fr 1fr;">
         <button class="ex-btn active" data-mode="single">Singolo esercizio</button>
         <button class="ex-btn" data-mode="circuit">Circuito</button>
+        <button class="ex-btn" data-mode="pair">👥 Coppia</button>
       </div>
+    </div>
+
+    <div class="calib-status-note" id="pairModeNote" style="display:none;">
+      🧪 Modalità sperimentale: inquadra entrambe le persone per intero, fianco a fianco. Ripetizioni e tempo in tenuta sono contati separatamente per ciascuna (etichette A/B sullo scheletro). Feedback vocale, obiettivi, taratura soglie e storico restano per ora solo per la modalità a una persona.
     </div>
 
     <div id="singleModeSection">
@@ -905,6 +910,17 @@
       <div class="rep-label">tempo in tenuta corretta</div>
     </div>
 
+    <div id="pairCountersRow" style="display:none; gap:10px; padding:6px 0 2px;">
+      <div class="rep-counter" style="flex:1;">
+        <div class="rep-num" id="pairNumA" style="color:#3ddc84;">0</div>
+        <div class="rep-label">A</div>
+      </div>
+      <div class="rep-counter" style="flex:1;">
+        <div class="rep-num" id="pairNumB" style="color:#3dd6dc;">0</div>
+        <div class="rep-label">B</div>
+      </div>
+    </div>
+
     <div id="repGoalRow" style="display:none; align-items:center; justify-content:center; gap:8px; font-size:11.5px; color:var(--ink-dim); padding-bottom:4px; flex-wrap:wrap;">
       <span>Traguardo</span>
       <input type="number" id="repGoalInput" min="1" value="10" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'IBM Plex Mono', monospace;">
@@ -996,6 +1012,10 @@ const voiceCommandHint = document.getElementById('voiceCommandHint');
 const modeSelect = document.getElementById('modeSelect');
 const singleModeSection = document.getElementById('singleModeSection');
 const circuitBuilder = document.getElementById('circuitBuilder');
+const pairModeNote = document.getElementById('pairModeNote');
+const pairCountersRow = document.getElementById('pairCountersRow');
+const pairNumA = document.getElementById('pairNumA');
+const pairNumB = document.getElementById('pairNumB');
 const circuitListEl = document.getElementById('circuitList');
 const savedProgramsList = document.getElementById('savedProgramsList');
 const saveProgramBtn = document.getElementById('saveProgramBtn');
@@ -1269,6 +1289,23 @@ function resetLandmarkFilters(){
   wlmFilterState = [];
 }
 
+// --- modalità coppia (sperimentale): due persone nella stessa inquadratura ---
+// Riusa lo stesso motore di valutazione a una persona (evaluate()/completeRep()
+// di ciascun esercizio) chiamandolo due volte per fotogramma, scambiando
+// exState/wlm sulla persona di turno (pairActiveSlot) invece di duplicare la
+// logica dei 16 esercizi — vedi renderPairFrame per i dettagli. Feedback
+// vocale, obiettivi, taratura soglie e storico restano scope della modalità
+// a una persona: qui si contano solo ripetizioni/tempo, mostrati a schermo.
+let pairModeActive = false;
+let pairActiveSlot = 0; // 0 = persona "A", 1 = persona "B": quale sta usando in questo istante il motore condiviso
+let pairRepCounts = [0, 0];
+let pairInvalidCounts = [0, 0];
+let pairTimerSeconds = [0, 0];
+let pairExStates = [{}, {}];
+let pairFilterState = [{ lm: [], wlm: [] }, { lm: [], wlm: [] }];
+let pairLastHipX = [null, null]; // posizione orizzontale dell'anca nell'ultimo fotogramma in cui ciascuno slot era occupato: serve a riconoscere le due persone da un fotogramma all'altro senza un vero id
+let pairLastTick = performance.now();
+
 let facingMode = 'environment';
 let appState = 'idle'; // idle | calibrating | active
 let calibStableSince = null;
@@ -1343,6 +1380,16 @@ function handleGoalReached(achievedLabel){
 // array di frasi: vengono mostrate insieme nella lista feedback ma pronunciate
 // una dopo l'altra in coda, senza sovrapporsi né interrompersi a vicenda.
 function completeRep(hadIssue, invalidMsg, validMsg){
+  // Modalità coppia: le due persone condividono lo stesso motore di
+  // valutazione (exState/wlm vengono scambiati per ciascuna prima di
+  // chiamare evaluate(), vedi renderPairFrame), ma qui il conteggio resta
+  // isolato per persona e non tocca voce/obiettivi/circuito/storico, che in
+  // questa modalità sperimentale restano solo per la sessione a una persona.
+  if(pairModeActive){
+    if(hadIssue) pairInvalidCounts[pairActiveSlot]++;
+    else pairRepCounts[pairActiveSlot]++;
+    return;
+  }
   // exState.phaseStart segna sempre l'inizio della fase conteggiata (ogni
   // esercizio a ripetizioni lo imposta prima di chiamare completeRep), quindi
   // qui è già disponibile la durata dell'intera ripetizione appena conclusa,
@@ -3668,15 +3715,22 @@ saveProgramBtn.addEventListener('click', () => {
 
 renderSavedPrograms();
 
+function startButtonLabel(){
+  if(appMode === 'circuit') return 'Avvia circuito';
+  if(appMode === 'pair') return 'Avvia allenamento in coppia';
+  return 'Avvia fotocamera';
+}
+
 modeSelect.querySelectorAll('.ex-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     if(running) return; // la modalità si sceglie prima di avviare la fotocamera
     modeSelect.querySelectorAll('.ex-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     appMode = btn.dataset.mode;
-    singleModeSection.style.display = appMode === 'single' ? 'block' : 'none';
+    singleModeSection.style.display = (appMode === 'single' || appMode === 'pair') ? 'block' : 'none';
     circuitBuilder.style.display = appMode === 'circuit' ? 'block' : 'none';
-    startBtn.textContent = appMode === 'circuit' ? 'Avvia circuito' : 'Avvia fotocamera';
+    pairModeNote.style.display = appMode === 'pair' ? 'block' : 'none';
+    startBtn.textContent = startButtonLabel();
     updateGoalUI();
   });
 });
@@ -3866,6 +3920,7 @@ howtoToggle.addEventListener('click', () => {
 
 function selectExercise(key){
   resetMetrics(); // registra/azzera le metriche dell'esercizio PRECEDENTE prima di cambiarlo
+  if(pairModeActive) resetPairCounters(); // idem per i conteggi della modalità coppia, se in corso
   currentExercise = key;
   document.querySelectorAll('.ex-btn').forEach(b => b.classList.toggle('active', b.dataset.ex === key));
   buildMetricRows();
@@ -4012,6 +4067,7 @@ function stopSession(){
   circuitCancelBtn.style.display = 'none';
 
   running = false;
+  stopPairMode();
   syncRecognition(); // ferma l'ascolto dei comandi vocali insieme alla sessione
   releaseWakeLock();
   stopCameraStream();
@@ -4030,7 +4086,7 @@ function stopSession(){
   updateThresholdCalibStatus();
 
   startBtn.disabled = false;
-  startBtn.textContent = appMode === 'circuit' ? 'Avvia circuito' : 'Avvia fotocamera';
+  startBtn.textContent = startButtonLabel();
   resetBtn.disabled = true;
 }
 
@@ -4549,9 +4605,9 @@ function drawReferenceOverlay(lm, refPose){
   ctx.restore();
 }
 
-function drawSkeleton(lm, ok){
+function drawSkeleton(lm, ok, personStyle){
   const w = canvas.width, h = canvas.height;
-  const color = ok ? '#3ddc84' : '#ff5c5c';
+  const color = personStyle ? (ok ? personStyle.ok : personStyle.bad) : (ok ? '#3ddc84' : '#ff5c5c');
   const connections = [
     [11,12],[11,23],[12,24],[23,24],
     [11,13],[13,15],[12,14],[14,16],
@@ -4595,12 +4651,153 @@ function drawSkeleton(lm, ok){
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(ok ? '✓' : '✗', cx, cy + 1);
+
+    // Modalità coppia: un'etichetta A/B accanto al badge, per distinguere le
+    // due persone a colpo d'occhio (il colore da solo, oltre a valere anche
+    // per il daltonismo come sopra, qui deve anche distinguere due scheletri
+    // contemporaneamente, non solo due stati corretto/scorretto).
+    if(personStyle && personStyle.label){
+      const lx = cx - 24;
+      ctx.beginPath();
+      ctx.arc(lx, cy, 10, 0, Math.PI*2);
+      ctx.fillStyle = '#0b1120';
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.font = 'bold 12px sans-serif';
+      ctx.fillText(personStyle.label, lx, cy + 1);
+    }
   }
 }
 
 function setStatus(ok, msg){
   statusDot.className = 'status-dot ' + (ok ? 'ok' : 'bad');
   statusText.textContent = msg;
+}
+
+// --- modalità coppia: due persone nella stessa inquadratura ---
+const PAIR_STYLES = [
+  { ok: '#3ddc84', bad: '#ff5c5c', label: 'A' }, // stessi colori usati altrove per corretto/scorretto
+  { ok: '#3dd6dc', bad: '#ffb23d', label: 'B' }
+];
+
+// Solo la parte legata all'esercizio corrente (fase, conteggi, filtri): la
+// si azzera anche cambiando esercizio a metà sessione di coppia, senza
+// toccare se la sessione stessa è in corso — a differenza di resetPairState,
+// che invece termina proprio la sessione.
+function resetPairCounters(){
+  pairActiveSlot = 0;
+  pairRepCounts = [0, 0];
+  pairInvalidCounts = [0, 0];
+  pairTimerSeconds = [0, 0];
+  pairExStates = [{}, {}];
+  pairFilterState = [{ lm: [], wlm: [] }, { lm: [], wlm: [] }];
+  pairLastHipX = [null, null];
+  updatePairCountersUI();
+}
+
+function resetPairState(){
+  pairModeActive = false;
+  resetPairCounters();
+}
+
+function startPairMode(){
+  pairModeActive = true;
+  resetPairCounters();
+  pairLastTick = performance.now();
+  pairCountersRow.style.display = 'flex';
+  updateViewBadge();
+  renderLoop();
+}
+
+function stopPairMode(){
+  pairModeActive = false;
+  pairCountersRow.style.display = 'none';
+}
+
+function updatePairCountersUI(){
+  const ex = EXERCISES[currentExercise];
+  const format = (i) => ex.mode === 'timer' ? formatRestTime(Math.floor(pairTimerSeconds[i])) : String(pairRepCounts[i]);
+  pairNumA.textContent = format(0);
+  pairNumB.textContent = format(1);
+}
+
+// Le due persone rilevate in un fotogramma non hanno un id stabile da parte
+// di MediaPipe: possono anche scambiarsi di ordine nell'array da un
+// fotogramma all'altro. Le si riconosce quindi dalla posizione orizzontale
+// dell'anca rispetto a dove si trovavano nell'ultimo fotogramma in cui erano
+// presenti — chi non ha ancora una posizione precedente (prima apparizione)
+// va nel primo slot libero, in ordine da sinistra a destra. Se le due
+// persone si scambiano fisicamente di posto, le etichette A/B potrebbero
+// scambiarsi con loro: limite noto di questa prima versione.
+function assignPairSlots(poses){
+  const hipXs = poses.map(p => {
+    const l = p[23], r = p[24];
+    return (l && r) ? (l.x + r.x) / 2 : null;
+  });
+  const assignment = [null, null];
+  const used = new Array(poses.length).fill(false);
+  for(let slot = 0; slot < 2; slot++){
+    if(pairLastHipX[slot] == null) continue;
+    let bestIdx = -1, bestDist = Infinity;
+    for(let j = 0; j < poses.length; j++){
+      if(used[j] || hipXs[j] == null) continue;
+      const d = Math.abs(hipXs[j] - pairLastHipX[slot]);
+      if(d < bestDist){ bestDist = d; bestIdx = j; }
+    }
+    if(bestIdx >= 0){ assignment[slot] = bestIdx; used[bestIdx] = true; }
+  }
+  const remaining = [];
+  for(let j = 0; j < poses.length; j++) if(!used[j] && hipXs[j] != null) remaining.push(j);
+  remaining.sort((a, b) => hipXs[a] - hipXs[b]);
+  for(const j of remaining){
+    const freeSlot = assignment[0] == null ? 0 : (assignment[1] == null ? 1 : null);
+    if(freeSlot == null) break; // già 2 persone assegnate: eventuali altre in inquadratura vengono ignorate
+    assignment[freeSlot] = j;
+  }
+  for(let slot = 0; slot < 2; slot++){
+    pairLastHipX[slot] = assignment[slot] != null ? hipXs[assignment[slot]] : pairLastHipX[slot];
+  }
+  return assignment;
+}
+
+function renderPairFrame(result, now){
+  const poses = result.landmarks || [];
+  const worldPoses = result.worldLandmarks || [];
+  const assignment = assignPairSlots(poses);
+  const ex = EXERCISES[currentExercise];
+  const dt = (now - pairLastTick) / 1000;
+  pairLastTick = now;
+
+  let anyPerson = false;
+  for(let slot = 0; slot < 2; slot++){
+    const idx = assignment[slot];
+    if(idx == null) continue;
+    anyPerson = true;
+    const rawLm = poses[idx];
+    const rawWlm = worldPoses[idx] || null;
+    const filteredLm = filterLandmarks(pairFilterState[slot].lm, rawLm, now);
+    const filteredWlm = rawWlm ? filterLandmarks(pairFilterState[slot].wlm, rawWlm, now) : null;
+
+    // Scambia sulla persona di turno gli stessi stati globali che il motore
+    // a una persona usa normalmente: da qui in poi, fino alla prossima
+    // iterazione, ex.evaluate() e completeRep() operano sui dati di questo
+    // slot esattamente come farebbero in una sessione singola.
+    exState = pairExStates[slot];
+    wlm = filteredWlm;
+    pairActiveSlot = slot;
+
+    let evalResult = null;
+    try{ evalResult = ex.evaluate(filteredLm); } catch(err){ evalResult = null; }
+    if(!evalResult) continue;
+
+    drawSkeleton(filteredLm, evalResult.ok, PAIR_STYLES[slot]);
+    if(ex.mode === 'timer' && evalResult.ok) pairTimerSeconds[slot] += dt;
+  }
+  setStatus(anyPerson, anyPerson ? 'Modalità coppia — inquadra entrambe le persone per intero' : 'Nessuna persona rilevata nell\'inquadratura');
+  updatePairCountersUI();
 }
 
 function renderLoop(){
@@ -4619,6 +4816,11 @@ function renderLoop(){
 
   const result = poseLandmarker.detectForVideo(video, now);
   ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  if(pairModeActive){
+    renderPairFrame(result, now);
+    return;
+  }
 
   const hasPerson = result.landmarks && result.landmarks.length > 0;
   const rawLm = hasPerson ? result.landmarks[0] : null;
@@ -4828,7 +5030,9 @@ function enterCalibratingState(){
   updateThresholdCalibStatus();
 }
 
-async function initPose(){
+let poseLandmarkerNumPoses = 0; // quante persone rileva l'istanza corrente di poseLandmarker (1 normalmente, 2 in modalità coppia)
+
+async function initPose(numPoses){
   const vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
   );
@@ -4845,15 +5049,28 @@ async function initPose(){
     poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
       baseOptions: { ...baseOptions, delegate: "GPU" },
       runningMode: "VIDEO",
-      numPoses: 1
+      numPoses: numPoses
     });
   } catch(err){
     console.warn('Delegate GPU non disponibile su questo dispositivo, passo alla CPU:', err);
     poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
       baseOptions: { ...baseOptions, delegate: "CPU" },
       runningMode: "VIDEO",
-      numPoses: 1
+      numPoses: numPoses
     });
+  }
+  poseLandmarkerNumPoses = numPoses;
+}
+
+// La modalità coppia richiede che il modello cerchi 2 persone invece di 1:
+// se esiste già un'istanza (creata per la modalità a una persona) le si
+// aggiornano solo le opzioni invece di ricrearla da zero, altrimenti si
+// inizializza subito con il numero di persone richiesto.
+async function ensurePoseLandmarker(numPoses){
+  if(!poseLandmarker){ await initPose(numPoses); return; }
+  if(poseLandmarkerNumPoses !== numPoses){
+    await poseLandmarker.setOptions({ numPoses });
+    poseLandmarkerNumPoses = numPoses;
   }
 }
 
@@ -4907,33 +5124,35 @@ startBtn.addEventListener('click', async () => {
     return;
   }
 
-  if(!poseLandmarker){
-    try{
-      await initPose();
-    } catch(err){
-      setStatus(false, 'Impossibile avviare il rilevamento posa: ' + err.message);
-      startBtn.disabled = false;
-      startBtn.textContent = 'Riprova';
-      loadingOverlay.style.display = 'none';
-      return;
-    }
+  try{
+    await ensurePoseLandmarker(appMode === 'pair' ? 2 : 1);
+  } catch(err){
+    setStatus(false, 'Impossibile avviare il rilevamento posa: ' + err.message);
+    startBtn.disabled = false;
+    startBtn.textContent = 'Riprova';
+    loadingOverlay.style.display = 'none';
+    return;
   }
   loadingOverlay.style.display = 'none';
   running = true;
   resetBtn.disabled = false;
   startBtn.textContent = 'In esecuzione';
   startBtn.disabled = true;
-  syncRecognition(); // avvia l'ascolto dei comandi vocali, se attivati
   requestWakeLock();
-  renderLoop();
 
-  if(appMode === 'circuit'){
-    startCircuit();
+  if(appMode === 'pair'){
+    startPairMode();
   } else {
-    repCounter.style.display = EXERCISES[currentExercise].mode === 'reps' ? 'flex' : 'none';
-    timerCounter.style.display = EXERCISES[currentExercise].mode === 'timer' ? 'block' : 'none';
-    updateViewBadge();
-    enterCalibratingState();
+    syncRecognition(); // avvia l'ascolto dei comandi vocali, se attivati
+    renderLoop();
+    if(appMode === 'circuit'){
+      startCircuit();
+    } else {
+      repCounter.style.display = EXERCISES[currentExercise].mode === 'reps' ? 'flex' : 'none';
+      timerCounter.style.display = EXERCISES[currentExercise].mode === 'timer' ? 'block' : 'none';
+      updateViewBadge();
+      enterCalibratingState();
+    }
   }
 });
 
