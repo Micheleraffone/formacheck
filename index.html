@@ -783,6 +783,7 @@
     </div>
 
     <div class="calib-status-note" id="recordBadge" style="display:none; text-align:center;"></div>
+    <div class="calib-status-note" id="recurringErrorBadge" style="display:none; text-align:center; color:var(--warn);"></div>
 
     <div class="howto-panel">
       <button class="howto-toggle" id="howtoToggle" aria-expanded="false">
@@ -867,6 +868,10 @@
     <button class="btn" id="recalibBtn" style="display:none;">Ricalibra posizione</button>
     <button class="btn" id="thresholdCalibBtn" style="display:none;">Taratura soglie personalizzata</button>
     <div class="calib-status-note" id="thresholdCalibStatus" style="display:none;"></div>
+    <div class="calib-status-note" id="recalibSuggestBadge" style="display:none;">
+      💡 Precisione altissima nelle ultime sessioni: la tua tecnica sembra migliorata. Vuoi ricalibrare le soglie per una sfida più precisa?
+      <button class="calib-skip" id="recalibSuggestBtn" style="display:block; margin:6px auto 0;">Ricalibra ora</button>
+    </div>
     <button class="btn" id="refPoseBtn" style="display:none;">👤 Postura di riferimento disattivata — tocca per attivare</button>
     <button class="btn" id="restBtn" style="display:none;">Inizia riposo</button>
     <button class="btn" id="circuitCancelBtn" style="display:none;">Termina circuito</button>
@@ -954,6 +959,8 @@ const calibSkip = document.getElementById('calibSkip');
 const recalibBtn = document.getElementById('recalibBtn');
 const thresholdCalibBtn = document.getElementById('thresholdCalibBtn');
 const thresholdCalibStatus = document.getElementById('thresholdCalibStatus');
+const recalibSuggestBadge = document.getElementById('recalibSuggestBadge');
+const recalibSuggestBtn = document.getElementById('recalibSuggestBtn');
 const refPoseBtn = document.getElementById('refPoseBtn');
 const thresholdCalibOverlay = document.getElementById('thresholdCalibOverlay');
 const thresholdCalibStepLabel = document.getElementById('thresholdCalibStepLabel');
@@ -996,6 +1003,7 @@ const sessionSummaryBody = document.getElementById('sessionSummaryBody');
 const sessionSummaryShareBtn = document.getElementById('sessionSummaryShareBtn');
 const sessionSummaryCloseBtn = document.getElementById('sessionSummaryCloseBtn');
 const recordBadge = document.getElementById('recordBadge');
+const recurringErrorBadge = document.getElementById('recurringErrorBadge');
 const historyBtn = document.getElementById('historyBtn');
 const historyOverlay = document.getElementById('historyOverlay');
 const streakBadge = document.getElementById('streakBadge');
@@ -1115,6 +1123,7 @@ let restIntervalId = null;
 let restOnComplete = null;
 let isResting = false;
 let isPaused = false; // messo in pausa dall'utente (tocco o comando vocale "pausa"): nessuna valutazione, camera solo in anteprima
+let announcedRecurringFor = new Set(); // esercizi per cui il pattern ricorrente è già stato annunciato a voce in questa sessione
 let circuitList = []; // [{key, target}]
 let circuitIndex = 0;
 let circuitActive = false;
@@ -2900,7 +2909,12 @@ function logSessionIfActive(){
     valid: repCount,
     invalid: invalidRepCount,
     seconds: Math.round(timerSeconds),
-    activeMs: Math.round(activeElapsedMs)
+    activeMs: Math.round(activeElapsedMs),
+    // motivo di scarto -> quante volte, in QUESTA sessione: permette di
+    // rilevare pattern ricorrenti su più sessioni (vedi
+    // getRecurringErrorPattern), non solo il "più frequente" della sessione
+    // corrente mostrato nel riepilogo a fine allenamento.
+    errorTally: Object.keys(sessionErrorTally).length ? sessionErrorTally : undefined
   });
 }
 
@@ -2913,13 +2927,18 @@ function aggregateHistory(){
     const dateStr = new Date(e.ts).toLocaleDateString('it-IT');
     const mapKey = dateStr + '|' + e.key;
     if(!map.has(mapKey)){
-      map.set(mapKey, { dateStr, key: e.key, label: e.label, mode: e.mode, valid: 0, invalid: 0, seconds: 0, ts: e.ts });
+      map.set(mapKey, { dateStr, key: e.key, label: e.label, mode: e.mode, valid: 0, invalid: 0, seconds: 0, ts: e.ts, errorTally: {} });
     }
     const agg = map.get(mapKey);
     agg.valid += e.valid || 0;
     agg.invalid += e.invalid || 0;
     agg.seconds += e.seconds || 0;
     agg.ts = Math.max(agg.ts, e.ts);
+    if(e.errorTally){
+      Object.keys(e.errorTally).forEach(reason => {
+        agg.errorTally[reason] = (agg.errorTally[reason] || 0) + e.errorTally[reason];
+      });
+    }
   });
   return [...map.values()].sort((a, b) => b.ts - a.ts);
 }
@@ -2944,12 +2963,56 @@ function updateRecordBadge(){
   const rec = getPersonalRecord(currentExercise);
   if(!rec){
     recordBadge.style.display = 'none';
+  } else {
+    recordBadge.style.display = 'block';
+    recordBadge.textContent = rec.mode === 'reps'
+      ? ('🏆 Record personale: ' + rec.value + ' ripetizioni in un giorno')
+      : ('🏆 Record personale: ' + formatRestTime(rec.value) + ' in tenuta corretta');
+  }
+  updateRecurringErrorBadge();
+}
+
+// --- pattern di errore ricorrenti ---
+// Se lo stesso errore di forma è il motivo di scarto principale in più
+// sessioni recenti (non solo in quella di oggi), lo segnala come tendenza
+// fin da quando si seleziona l'esercizio — non serve rifare lo stesso
+// errore per sentirselo dire di nuovo ogni volta a ripetizione, lo si sa
+// già prima di iniziare.
+const RECURRING_ERROR_SESSIONS = 5; // quante sessioni recenti (per giorno) considerare
+const RECURRING_ERROR_MIN_SESSIONS_WITH_ISSUE = 2; // in quante deve comparire per contare come tendenza
+const RECURRING_ERROR_MIN_TOTAL = 4; // scarti totali minimi prima di trarre conclusioni
+
+function getRecurringErrorPattern(exerciseKey){
+  const rows = aggregateHistory().filter(r => r.key === exerciseKey).slice(0, RECURRING_ERROR_SESSIONS);
+  const totals = {};
+  const sessionsWithIssue = {};
+  let totalInvalid = 0;
+  rows.forEach(r => {
+    Object.keys(r.errorTally || {}).forEach(reason => {
+      totals[reason] = (totals[reason] || 0) + r.errorTally[reason];
+      sessionsWithIssue[reason] = (sessionsWithIssue[reason] || 0) + 1;
+      totalInvalid += r.errorTally[reason];
+    });
+  });
+  if(totalInvalid < RECURRING_ERROR_MIN_TOTAL) return null;
+  let topReason = null, topCount = 0;
+  Object.keys(totals).forEach(reason => {
+    if(totals[reason] > topCount){ topCount = totals[reason]; topReason = reason; }
+  });
+  if(!topReason) return null;
+  if(sessionsWithIssue[topReason] < RECURRING_ERROR_MIN_SESSIONS_WITH_ISSUE) return null;
+  if(topCount / totalInvalid < 0.4) return null; // non abbastanza dominante rispetto agli altri motivi
+  return topReason;
+}
+
+function updateRecurringErrorBadge(){
+  const pattern = getRecurringErrorPattern(currentExercise);
+  if(!pattern){
+    recurringErrorBadge.style.display = 'none';
     return;
   }
-  recordBadge.style.display = 'block';
-  recordBadge.textContent = rec.mode === 'reps'
-    ? ('🏆 Record personale: ' + rec.value + ' ripetizioni in un giorno')
-    : ('🏆 Record personale: ' + formatRestTime(rec.value) + ' in tenuta corretta');
+  recurringErrorBadge.style.display = 'block';
+  recurringErrorBadge.textContent = '📈 Ultimamente tendi a: ' + pattern;
 }
 
 // --- obiettivi e serie di giorni consecutivi ---
@@ -3065,6 +3128,7 @@ function updateThresholdCalibStatus(){
   if(!ex.calib){
     thresholdCalibBtn.style.display = 'none';
     thresholdCalibStatus.style.display = 'none';
+    recalibSuggestBadge.style.display = 'none';
     refPoseBtn.style.display = 'none';
     return;
   }
@@ -3078,9 +3142,36 @@ function updateThresholdCalibStatus(){
   } else {
     thresholdCalibStatus.style.display = 'none';
   }
+  recalibSuggestBadge.style.display = getRecalibrationSuggestion(currentExercise) ? 'block' : 'none';
+  recalibSuggestBtn.disabled = appState !== 'active';
   refPoseBtn.style.display = ex.refPose ? 'block' : 'none';
   updateRefPoseBtn();
 }
+
+// --- auto-calibrazione progressiva (suggerita, mai automatica in silenzio) ---
+// Non tocchiamo mai le soglie da soli: cambiarle senza che l'utente se ne
+// accorga significherebbe indebolire (o irrigidire) in silenzio i controlli
+// di sicurezza della forma, che sono il punto centrale dell'app. Quello che
+// FACCIAMO in automatico è accorgerci, dallo storico, di quando le soglie
+// attuali sembrano ormai troppo larghe per la tecnica dimostrata di
+// recente, e proporre — mai imporre — di ripetere la taratura.
+function getRecalibrationSuggestion(exerciseKey){
+  const ex = EXERCISES[exerciseKey];
+  if(!ex || !ex.calib) return false;
+  const meta = getSavedMeta(exerciseKey);
+  if(!meta) return false; // senza una calibrazione personalizzata attiva non c'è nulla da proporre di "aggiornare"
+  const calibratedAt = new Date(meta.calibratedAt).getTime();
+  const rows = aggregateHistory()
+    .filter(r => r.key === exerciseKey && r.ts > calibratedAt && (r.valid + r.invalid) >= 5)
+    .slice(0, 5);
+  if(rows.length < 5) return false;
+  return rows.every(r => (r.valid / (r.valid + r.invalid)) >= 0.9);
+}
+
+recalibSuggestBtn.addEventListener('click', () => {
+  if(appState !== 'active') return;
+  startThresholdCalibration();
+});
 
 // --- wizard di taratura soglie personalizzate ---
 const THRESH_HOLD_MS = 2200;
@@ -3711,6 +3802,7 @@ function hasCurrentActivity(){
 // scegliere liberamente tra esercizio singolo e circuito.
 function stopSession(){
   resetMetrics();
+  announcedRecurringFor = new Set();
 
   clearInterval(restIntervalId);
   isResting = false;
@@ -4399,6 +4491,16 @@ function enterActiveState(){
   framingBadSince = null;
   setStatus(true, 'Rilevamento attivo');
   updateThresholdCalibStatus();
+
+  // Il pattern ricorrente si annuncia a voce una sola volta per esercizio in
+  // questa sessione (non a ogni ricalibrazione di posizione durante lo
+  // stesso allenamento): il badge nel pannello resta comunque sempre
+  // visibile per la consultazione.
+  if(!announcedRecurringFor.has(currentExercise)){
+    announcedRecurringFor.add(currentExercise);
+    const pattern = getRecurringErrorPattern(currentExercise);
+    if(pattern) pushFeedback('Ultimamente tendi a: ' + pattern, false);
+  }
 }
 
 function enterCalibratingState(){
