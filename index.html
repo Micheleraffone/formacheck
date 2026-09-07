@@ -1142,27 +1142,80 @@ let lastVideoTime = -1;
 // da ogni funzione evaluate()/sample() senza doverla passare esplicitamente.
 let wlm = null;
 // Levigatura: i punti tremolano leggermente da un fotogramma all'altro
-// (rumore del modello). Una media mobile esponenziale li stabilizza prima di
-// calcolare angoli/distanze, riducendo ulteriormente falsi positivi e negativi.
+// (rumore del modello). Filtro One Euro (Casiez et al.) invece di una media
+// mobile esponenziale a fattore fisso: si adatta alla velocità del punto,
+// levigando molto quando è quasi fermo (rumore del modello, es. durante una
+// tenuta) e levigando meno quando si muove rapidamente (una vera
+// ripetizione veloce), così da ridurre il ritardo introdotto sui movimenti
+// rapidi senza rinunciare alla stabilità sui tratti lenti/fermi — con
+// l'alpha fisso di prima i due casi erano necessariamente un compromesso
+// unico. Calcola angoli/distanze sull'output già levigato, riducendo
+// ulteriormente falsi positivi e negativi dovuti al tremolio.
 let smoothedLm = null;
 let smoothedWlm = null;
-const SMOOTH_ALPHA = 0.55; // 1 = nessuna levigatura, valori più bassi = più stabile ma più "in ritardo"
-function emaLandmarks(prev, curr, alpha){
+// Parametri in unità "per secondo": i landmark 2D sono normalizzati 0-1 sul
+// frame, i landmark 3D (world) sono in metri — per il corpo umano sono
+// ordini di grandezza simili, quindi la stessa taratura va bene per entrambi
+// (come accadeva già con l'unico SMOOTH_ALPHA usato su entrambi prima).
+const ONEEURO_MIN_CUTOFF = 0.02; // più basso = più levigatura sui punti quasi fermi
+const ONEEURO_BETA = 2.0;        // quanto la levigatura si allenta all'aumentare della velocità
+const ONEEURO_D_CUTOFF = 1.0;    // levigatura della stima di velocità usata sopra
+
+function oneEuroAlpha(cutoff, dt){
+  const tau = 1 / (2 * Math.PI * cutoff);
+  return 1 / (1 + tau / dt);
+}
+
+function newOneEuroAxis(){
+  return { prevVal: null, prevDeriv: 0, prevT: null };
+}
+
+function oneEuroStep(axis, value, tMs){
+  if(axis.prevT == null){
+    axis.prevVal = value; axis.prevDeriv = 0; axis.prevT = tMs;
+    return value;
+  }
+  let dt = (tMs - axis.prevT) / 1000; // secondi
+  if(dt <= 0) dt = 1/30; // fotogramma duplicato/orologio fermo: assume un frame-time tipico
+  axis.prevT = tMs;
+  const deriv = (value - axis.prevVal) / dt;
+  const derivHat = axis.prevDeriv + oneEuroAlpha(ONEEURO_D_CUTOFF, dt) * (deriv - axis.prevDeriv);
+  const cutoff = ONEEURO_MIN_CUTOFF + ONEEURO_BETA * Math.abs(derivHat);
+  const valHat = axis.prevVal + oneEuroAlpha(cutoff, dt) * (value - axis.prevVal);
+  axis.prevVal = valHat;
+  axis.prevDeriv = derivHat;
+  return valHat;
+}
+
+// Uno stato di filtro per landmark per asse, creato pigramente al primo
+// utilizzo e azzerato quando la persona esce dall'inquadratura (vedi
+// resetLandmarkFilters) — altrimenti al suo ritorno, magari in una posizione
+// del tutto diversa, il filtro la "insegue" con un ritardo posticcio invece
+// di agganciarla subito.
+let lmFilterState = [];
+let wlmFilterState = [];
+
+function filterLandmarks(state, curr, tMs){
   if(!curr) return null;
-  if(!prev || prev.length !== curr.length) return curr;
   const out = new Array(curr.length);
   for(let i = 0; i < curr.length; i++){
-    const p = prev[i], c = curr[i];
-    if(!c){ out[i] = p; continue; }
-    if(!p){ out[i] = c; continue; }
+    const c = curr[i];
+    if(!c){ out[i] = null; continue; }
+    if(!state[i]) state[i] = { x: newOneEuroAxis(), y: newOneEuroAxis(), z: newOneEuroAxis() };
+    const f = state[i];
     out[i] = {
-      x: p.x + (c.x - p.x) * alpha,
-      y: p.y + (c.y - p.y) * alpha,
-      z: (c.z != null && p.z != null) ? p.z + (c.z - p.z) * alpha : c.z,
+      x: oneEuroStep(f.x, c.x, tMs),
+      y: oneEuroStep(f.y, c.y, tMs),
+      z: c.z != null ? oneEuroStep(f.z, c.z, tMs) : c.z,
       visibility: c.visibility // la confidenza usa sempre il valore più recente, non va levigata
     };
   }
   return out;
+}
+
+function resetLandmarkFilters(){
+  lmFilterState = [];
+  wlmFilterState = [];
 }
 
 let facingMode = 'environment';
@@ -4310,11 +4363,12 @@ function renderLoop(){
   const rawLm = hasPerson ? result.landmarks[0] : null;
   const rawWlm = hasPerson && result.worldLandmarks ? result.worldLandmarks[0] : null;
   if(hasPerson){
-    smoothedLm = emaLandmarks(smoothedLm, rawLm, SMOOTH_ALPHA);
-    smoothedWlm = emaLandmarks(smoothedWlm, rawWlm, SMOOTH_ALPHA);
+    smoothedLm = filterLandmarks(lmFilterState, rawLm, now);
+    smoothedWlm = filterLandmarks(wlmFilterState, rawWlm, now);
   } else {
     smoothedLm = null;
     smoothedWlm = null;
+    resetLandmarkFilters();
   }
   const lm = smoothedLm;
   wlm = smoothedWlm;
@@ -4517,14 +4571,29 @@ async function initPose(){
   const vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
   );
-  poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
-      delegate: "GPU"
-    },
-    runningMode: "VIDEO",
-    numPoses: 1
-  });
+  const baseOptions = {
+    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
+  };
+  // Il delegate GPU (accelerazione hardware — il modello usa il backend più
+  // veloce che il browser espone sotto al cofano) riduce nettamente latenza
+  // e tremolio rispetto alla CPU, ma non tutti i browser/telefoni più
+  // datati lo supportano: senza un ripiego, l'inizializzazione fallirebbe
+  // del tutto su quei dispositivi (schermata di caricamento bloccata)
+  // invece di limitarsi a essere più lenta ma funzionante.
+  try{
+    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: { ...baseOptions, delegate: "GPU" },
+      runningMode: "VIDEO",
+      numPoses: 1
+    });
+  } catch(err){
+    console.warn('Delegate GPU non disponibile su questo dispositivo, passo alla CPU:', err);
+    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: { ...baseOptions, delegate: "CPU" },
+      runningMode: "VIDEO",
+      numPoses: 1
+    });
+  }
 }
 
 async function startCamera(){
@@ -4578,7 +4647,15 @@ startBtn.addEventListener('click', async () => {
   }
 
   if(!poseLandmarker){
-    await initPose();
+    try{
+      await initPose();
+    } catch(err){
+      setStatus(false, 'Impossibile avviare il rilevamento posa: ' + err.message);
+      startBtn.disabled = false;
+      startBtn.textContent = 'Riprova';
+      loadingOverlay.style.display = 'none';
+      return;
+    }
   }
   loadingOverlay.style.display = 'none';
   running = true;
