@@ -666,6 +666,14 @@
   <div class="stage" id="stage">
     <video id="video" autoplay playsinline muted></video>
     <canvas id="overlay"></canvas>
+    <!-- Non mostrano la fotocamera: disegnano solo il conto alla rovescia del
+         riposo, per poterlo mettere in una finestra Picture-in-Picture (la
+         PiP nativa del browser richiede un elemento <video> reale come
+         sorgente, quindi lo alimentiamo con lo stream catturato da questo
+         canvas). Fuori schermo ma non display:none, perché alcuni browser
+         non supportano la PiP su un video mai stato visibile/renderizzato. -->
+    <canvas id="pipCanvas" width="320" height="200" style="position:fixed; left:-9999px; top:0; width:320px; height:200px;"></canvas>
+    <video id="pipVideo" muted playsinline style="position:fixed; left:-9999px; top:0; width:320px; height:200px;"></video>
     <div class="stage-badge" id="fpsBadge">— fps</div>
     <button class="expand-btn" id="expandBtn" title="Ingrandisci l'inquadratura">⤢</button>
     <div class="loading-overlay" id="loadingOverlay" style="display:none;">
@@ -688,6 +696,7 @@
       <div class="calib-title">Riposo</div>
       <div class="calib-hint" id="restNextLabel"></div>
       <div class="rest-countdown" id="restCountdown">60</div>
+      <button class="calib-skip" id="restPipBtn" style="display:none; margin-bottom:8px;">📺 Timer in finestra flottante</button>
       <button class="calib-skip" id="restSkipBtn">Salta riposo</button>
     </div>
     <div class="calib-overlay" id="pauseOverlay" style="display:none;">
@@ -861,6 +870,16 @@
 
     <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
 
+    <div>
+      <div class="section-label">Backup dati</div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn" id="exportBackupBtn" style="flex:1;">💾 Esporta backup</button>
+        <button class="btn" id="importBackupBtn" style="flex:1;">📂 Importa backup</button>
+      </div>
+      <input type="file" id="importBackupInput" accept="application/json" style="display:none;">
+      <div class="calib-status-note" id="backupStatusNote" style="display:none;"></div>
+    </div>
+
     <div class="controls">
       <button class="btn primary" id="startBtn">Avvia fotocamera</button>
       <button class="btn" id="resetBtn" disabled>Azzera</button>
@@ -988,6 +1007,9 @@ const restOverlay = document.getElementById('restOverlay');
 const restNextLabel = document.getElementById('restNextLabel');
 const restCountdown = document.getElementById('restCountdown');
 const restSkipBtn = document.getElementById('restSkipBtn');
+const restPipBtn = document.getElementById('restPipBtn');
+const pipCanvas = document.getElementById('pipCanvas');
+const pipVideo = document.getElementById('pipVideo');
 const pauseOverlay = document.getElementById('pauseOverlay');
 const resumeBtn = document.getElementById('resumeBtn');
 const circuitIntroOverlay = document.getElementById('circuitIntroOverlay');
@@ -1006,6 +1028,10 @@ const recordBadge = document.getElementById('recordBadge');
 const recurringErrorBadge = document.getElementById('recurringErrorBadge');
 const historyBtn = document.getElementById('historyBtn');
 const historyOverlay = document.getElementById('historyOverlay');
+const exportBackupBtn = document.getElementById('exportBackupBtn');
+const importBackupBtn = document.getElementById('importBackupBtn');
+const importBackupInput = document.getElementById('importBackupInput');
+const backupStatusNote = document.getElementById('backupStatusNote');
 const streakBadge = document.getElementById('streakBadge');
 const goalWeeklyInput = document.getElementById('goalWeeklyInput');
 const goalProgressBar = document.getElementById('goalProgressBar');
@@ -3420,10 +3446,13 @@ function startRestTimer(seconds, nextLabel, onComplete){
   restNextLabel.textContent = nextLabel || '';
   restCountdown.textContent = formatRestTime(restRemaining);
   restOverlay.style.display = 'flex';
+  restPipBtn.style.display = pipSupported ? 'block' : 'none';
+  updatePipFrame(nextLabel);
   clearInterval(restIntervalId);
   restIntervalId = setInterval(() => {
     restRemaining--;
     restCountdown.textContent = formatRestTime(Math.max(0, restRemaining));
+    updatePipFrame(nextLabel);
     // Negli ultimi 3 secondi, un conto alla rovescia vocale: così chi si sta
     // riposando lontano dallo schermo sa quando sta per ripartire senza
     // dover guardare il telefono.
@@ -3438,6 +3467,7 @@ function startRestTimer(seconds, nextLabel, onComplete){
 function completeRest(){
   isResting = false;
   restOverlay.style.display = 'none';
+  exitPip();
   playBeep();
   if(voiceEnabled) speak('Riposo terminato');
   const cb = restOnComplete;
@@ -3449,6 +3479,54 @@ function skipRestTimer(){
   clearInterval(restIntervalId);
   completeRest();
 }
+
+// --- Picture-in-Picture per il conto alla rovescia del riposo ---
+// La PiP nativa del browser mostra sempre un <video>: qui il "video" è in
+// realtà un canvas ridisegnato ogni secondo con il tempo restante,
+// catturato come MediaStream — così durante il riposo tra un esercizio e
+// l'altro del circuito si può controllare il telefono per altro senza
+// perdere il conto alla rovescia, che resta visibile nella finestra
+// flottante del sistema operativo.
+const pipSupported = !!(document.pictureInPictureEnabled && window.HTMLVideoElement && HTMLVideoElement.prototype.requestPictureInPicture);
+const pipCtx = pipSupported ? pipCanvas.getContext('2d') : null;
+let pipStreamStarted = false;
+
+function updatePipFrame(nextLabel){
+  if(!pipCtx) return;
+  const w = pipCanvas.width, h = pipCanvas.height;
+  pipCtx.fillStyle = '#0b1120';
+  pipCtx.fillRect(0, 0, w, h);
+  pipCtx.fillStyle = '#e6edf7';
+  pipCtx.textAlign = 'center';
+  pipCtx.textBaseline = 'middle';
+  pipCtx.font = 'bold 84px system-ui, sans-serif';
+  pipCtx.fillText(formatRestTime(Math.max(0, restRemaining)), w / 2, h / 2 - 8);
+  pipCtx.font = '20px system-ui, sans-serif';
+  pipCtx.fillStyle = '#9fb0c9';
+  pipCtx.fillText(nextLabel ? 'Riposo — poi ' + nextLabel : 'Riposo', w / 2, h / 2 + 62);
+}
+
+async function startPip(){
+  if(!pipSupported) return;
+  try{
+    if(!pipStreamStarted){
+      pipVideo.srcObject = pipCanvas.captureStream(2); // 2 fps: basta per un numero che cambia una volta al secondo
+      await pipVideo.play();
+      pipStreamStarted = true;
+    }
+    await pipVideo.requestPictureInPicture();
+  } catch(err){
+    // negato dal browser (es. richiesta non partita da un gesto utente diretto) o non disponibile in questo contesto: si resta sull'overlay normale, nessun blocco
+  }
+}
+
+function exitPip(){
+  if(document.pictureInPictureElement === pipVideo){
+    document.exitPictureInPicture().catch(() => { /* già uscito */ });
+  }
+}
+
+if(restPipBtn) restPipBtn.addEventListener('click', startPip);
 
 restSkipBtn.addEventListener('click', skipRestTimer);
 
@@ -3702,6 +3780,7 @@ function cancelCircuit(){
   clearInterval(restIntervalId);
   isResting = false;
   restOverlay.style.display = 'none';
+  exitPip();
   circuitIntroOverlay.style.display = 'none';
   circuitProgressNote.style.display = 'none';
   circuitCancelBtn.style.display = 'none';
@@ -3924,6 +4003,7 @@ function stopSession(){
   clearInterval(restIntervalId);
   isResting = false;
   restOverlay.style.display = 'none';
+  exitPip();
   isPaused = false;
   pauseOverlay.style.display = 'none';
   circuitActive = false;
@@ -4139,6 +4219,122 @@ historyExportBtn.addEventListener('click', exportHistory);
 historyClearBtn.addEventListener('click', () => {
   clearHistory();
   renderHistory();
+});
+
+// --- backup dati locale (File System Access API, con ripiego a download) ---
+// Tutto lo stato dell'app vive solo in localStorage: cambiare browser,
+// svuotare i dati del sito o passare a un altro dispositivo cancella
+// storico, soglie calibrate, programmi salvati e preferenze. Un backup/
+// ripristino locale (nessun server coinvolto, solo un file JSON) permette
+// di portarseli dietro.
+const BACKUP_KEYS = [
+  THEME_STORAGE_KEY, CAPTIONS_STORAGE_KEY, VOICE_COMMAND_STORAGE_KEY,
+  THRESH_STORAGE_KEY, HISTORY_STORAGE_KEY, GOAL_STORAGE_KEY,
+  WEIGHT_STORAGE_KEY, REF_POSE_ENABLED_KEY, PROGRAMS_STORAGE_KEY
+];
+
+function showBackupStatus(msg, ok){
+  backupStatusNote.textContent = (ok ? '✅ ' : '⚠️ ') + msg;
+  backupStatusNote.style.display = 'block';
+}
+
+function buildBackupPayload(){
+  const data = {};
+  BACKUP_KEYS.forEach(key => {
+    const raw = localStorage.getItem(key);
+    if(raw != null) data[key] = raw; // salvate come stringhe grezze: al ripristino vanno riscritte così come sono, senza reinterpretare il formato di ciascuna chiave
+  });
+  return { app: 'formacheck', version: 1, exportedAt: new Date().toISOString(), data };
+}
+
+async function exportBackup(){
+  const payload = buildBackupPayload();
+  const json = JSON.stringify(payload, null, 2);
+  const filename = 'formacheck-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+
+  if(window.showSaveFilePicker){
+    try{
+      const handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [{ description: 'Backup FormaCheck', accept: { 'application/json': ['.json'] } }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(json);
+      await writable.close();
+      showBackupStatus('Backup salvato.', true);
+      return;
+    } catch(err){
+      if(err && err.name === 'AbortError') return; // finestra di salvataggio annullata dall'utente
+      // altrimenti l'API non è utilizzabile in questo contesto: prosegue con il ripiego sotto
+    }
+  }
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showBackupStatus('Backup scaricato.', true);
+}
+
+async function readBackupFile(file){
+  const text = await file.text();
+  let parsed;
+  try{ parsed = JSON.parse(text); }
+  catch(err){ throw new Error('Il file non è un backup FormaCheck valido (JSON non leggibile).'); }
+  if(!parsed || parsed.app !== 'formacheck' || !parsed.data || typeof parsed.data !== 'object'){
+    throw new Error('Il file non è un backup FormaCheck valido.');
+  }
+  return parsed;
+}
+
+function applyBackup(parsed){
+  BACKUP_KEYS.forEach(key => {
+    const value = parsed.data[key];
+    if(typeof value === 'string') localStorage.setItem(key, value);
+  });
+}
+
+async function importBackup(file){
+  if(!file) return;
+  try{
+    const parsed = await readBackupFile(file);
+    const count = Object.keys(parsed.data).filter(k => BACKUP_KEYS.includes(k)).length;
+    if(count === 0){ showBackupStatus('Il file non contiene dati riconosciuti.', false); return; }
+    const when = parsed.exportedAt ? new Date(parsed.exportedAt).toLocaleString('it-IT') : 'file selezionato';
+    if(!confirm('Ripristinare il backup del ' + when + '? I dati locali attuali (storico, soglie, programmi) verranno sostituiti.')) return;
+    applyBackup(parsed);
+    showBackupStatus('Backup ripristinato, ricarico l\'app…', true);
+    setTimeout(() => location.reload(), 1200); // il modo più semplice e sicuro per far ripartire tutta l'app dai dati appena scritti
+  } catch(err){
+    showBackupStatus(err.message || 'Errore durante l\'importazione del backup.', false);
+  }
+}
+
+exportBackupBtn.addEventListener('click', exportBackup);
+importBackupBtn.addEventListener('click', async () => {
+  if(window.showOpenFilePicker){
+    try{
+      const [handle] = await window.showOpenFilePicker({
+        types: [{ description: 'Backup FormaCheck', accept: { 'application/json': ['.json'] } }],
+        multiple: false
+      });
+      await importBackup(await handle.getFile());
+      return;
+    } catch(err){
+      if(err && err.name === 'AbortError') return; // selezione annullata dall'utente
+      // altrimenti l'API non è utilizzabile in questo contesto: prosegue con il ripiego sotto
+    }
+  }
+  importBackupInput.click();
+});
+importBackupInput.addEventListener('change', async () => {
+  const file = importBackupInput.files[0];
+  importBackupInput.value = ''; // permette di reimportare lo stesso file una seconda volta
+  await importBackup(file);
 });
 
 function pushFeedback(msg, ok){
