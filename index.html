@@ -765,9 +765,7 @@
       <div class="exercise-select" id="modeSelect" style="grid-template-columns:1fr 1fr;">
         <button class="ex-btn active" data-mode="single">Singolo esercizio</button>
         <button class="ex-btn" data-mode="circuit">Circuito</button>
-        <button class="ex-btn" data-mode="auto" style="grid-column:1 / -1;">🤖 Rilevamento automatico</button>
       </div>
-      <div class="calib-status-note" id="autoModeHint" style="display:none; margin-top:8px;">Non serve scegliere l'esercizio: inizia a muoverti e l'app riconosce da sola cosa stai facendo, passando automaticamente alla valutazione giusta. Copre 8 esercizi (squat, affondo, flessioni, plank, jumping jack, mountain climber, ponte glutei, ginocchia alte) — gli altri restano selezionabili solo dalle altre due modalità. È un riconoscimento euristico, non perfetto: se sbaglia, seleziona l'esercizio a mano dalla modalità "Singolo esercizio".</div>
     </div>
 
     <div id="singleModeSection">
@@ -979,7 +977,6 @@ const voiceCommandHint = document.getElementById('voiceCommandHint');
 const modeSelect = document.getElementById('modeSelect');
 const singleModeSection = document.getElementById('singleModeSection');
 const circuitBuilder = document.getElementById('circuitBuilder');
-const autoModeHint = document.getElementById('autoModeHint');
 const circuitListEl = document.getElementById('circuitList');
 const savedProgramsList = document.getElementById('savedProgramsList');
 const saveProgramBtn = document.getElementById('saveProgramBtn');
@@ -3484,7 +3481,6 @@ modeSelect.querySelectorAll('.ex-btn').forEach(btn => {
     appMode = btn.dataset.mode;
     singleModeSection.style.display = appMode === 'single' ? 'block' : 'none';
     circuitBuilder.style.display = appMode === 'circuit' ? 'block' : 'none';
-    autoModeHint.style.display = appMode === 'auto' ? 'block' : 'none';
     startBtn.textContent = appMode === 'circuit' ? 'Avvia circuito' : 'Avvia fotocamera';
     updateGoalUI();
   });
@@ -3807,7 +3803,6 @@ function hasCurrentActivity(){
 function stopSession(){
   resetMetrics();
   announcedRecurringFor = new Set();
-  autoDetectState = { candidate: null, since: null, switchCandidate: null, switchSince: null };
 
   clearInterval(restIntervalId);
   isResting = false;
@@ -4089,143 +4084,6 @@ function al(lm){
   return wlm || lm;
 }
 
-// --- rilevamento automatico dell'esercizio (modalità "Rilevamento
-// automatico") ---
-// Un classificatore euristico su angoli/posizioni delle articolazioni, non
-// un modello di machine learning: guarda orientamento del busto, quanto
-// sono piegati ginocchia/gomiti e la posizione di mani/piedi per indovinare
-// quale esercizio si sta facendo. Copre solo gli 8 esercizi geometricamente
-// più distinguibili fra loro; gli altri (burpee, sedia a muro, dip su
-// sedia, plank laterale, russian twist, crunch, bicycle crunch,
-// sollevamento gambe) sono deliberatamente esclusi — troppo simili ad altri
-// nella sola posa, o dipendenti da un oggetto (sedia/muro) invisibile al
-// rilevamento — e restano selezionabili solo dalle altre due modalità.
-const AUTO_DETECT_MIN_VIS = 0.5;
-
-function extractAutoFeatures(lm){
-  const idx = [11,12,13,14,15,16,23,24,25,26,27,28];
-  for(const i of idx){
-    if(!lm[i] || (lm[i].visibility != null && lm[i].visibility < AUTO_DETECT_MIN_VIS)) return null;
-  }
-  const lSh=lm[11], rSh=lm[12], lEl=lm[13], rEl=lm[14], lWr=lm[15], rWr=lm[16];
-  const lHip=lm[23], rHip=lm[24], lKnee=lm[25], rKnee=lm[26], lAnkle=lm[27], rAnkle=lm[28];
-  const shMid = { x:(lSh.x+rSh.x)/2, y:(lSh.y+rSh.y)/2 };
-  const hipMid = { x:(lHip.x+rHip.x)/2, y:(lHip.y+rHip.y)/2 };
-  const torsoAngle = angleFromVertical(shMid, hipMid); // 0° = busto verticale, 90° = orizzontale
-
-  const kneeL = angleBetween(lHip, lKnee, lAnkle);
-  const kneeR = angleBetween(rHip, rKnee, rAnkle);
-  if(kneeL == null || kneeR == null) return null;
-  const kneeMin = Math.min(kneeL, kneeR);
-  const kneeDiff = Math.abs(kneeL - kneeR);
-
-  const elbowL = angleBetween(lSh, lEl, lWr);
-  const elbowR = angleBetween(rSh, rEl, rWr);
-  const elbowMin = (elbowL == null || elbowR == null) ? 180 : Math.min(elbowL, elbowR);
-
-  const shoulderWidth = Math.hypot(lSh.x-rSh.x, lSh.y-rSh.y) || 0.01;
-  const hipWidth = Math.hypot(lHip.x-rHip.x, lHip.y-rHip.y) || 0.01;
-  const wristSep = Math.hypot(lWr.x-rWr.x, lWr.y-rWr.y) / shoulderWidth;
-  const ankleSep = Math.hypot(lAnkle.x-rAnkle.x, lAnkle.y-rAnkle.y) / hipWidth;
-  const wristsUp = lWr.y < shMid.y && rWr.y < shMid.y; // entrambi i polsi sopra le spalle (y minore = più in alto)
-
-  return { torsoAngle, kneeMin, kneeDiff, elbowMin, wristSep, ankleSep, wristsUp };
-}
-
-function classifyExercise(lm){
-  const f = extractAutoFeatures(lm);
-  if(!f) return null;
-  const candidates = [];
-
-  if(f.torsoAngle < 35){
-    // In piedi: affondo (ginocchia molto asimmetriche), ginocchia alte
-    // (asimmetria ancora più marcata e ginocchio guida molto piegato),
-    // jumping jack (braccia sopra le spalle e/o piedi larghi), squat
-    // (ginocchia piegate ma simmetriche).
-    if(f.kneeDiff > 55 && f.kneeMin < 100){
-      candidates.push({ key:'highknees', score: 2 + f.kneeDiff/50 });
-    } else if(f.kneeDiff > 35 && f.kneeMin < 140){
-      candidates.push({ key:'lunge', score: 2 + f.kneeDiff/50 });
-    }
-    if(f.wristsUp && f.ankleSep > 1.3){
-      candidates.push({ key:'jumpingjack', score: 3 });
-    } else if(f.wristsUp || f.ankleSep > 1.6){
-      candidates.push({ key:'jumpingjack', score: 1.4 });
-    }
-    if(f.kneeDiff < 25 && f.kneeMin < 155 && f.kneeMin > 45){
-      candidates.push({ key:'squat', score: 1.5 + (155-f.kneeMin)/120 });
-    }
-  } else if(f.torsoAngle > 55){
-    // Orizzontale (di lato, a terra): mountain climber (ginocchia molto
-    // asimmetriche, una guida in avanti), ponte glutei (ginocchia piegate
-    // ma simmetriche e ferme), altrimenti gambe pressoché dritte — plank o
-    // flessioni, distinti dal piegamento del gomito.
-    if(f.kneeDiff > 40){
-      candidates.push({ key:'mountainclimber', score: 2 + f.kneeDiff/50 });
-    } else if(f.kneeMin < 140){
-      candidates.push({ key:'glutebridge', score: 1.4 });
-    } else if(f.elbowMin < 145){
-      candidates.push({ key:'pushup', score: 1.5 + (145-f.elbowMin)/70 });
-    } else {
-      candidates.push({ key:'plank', score: 1 });
-    }
-  }
-
-  if(candidates.length === 0) return null;
-  candidates.sort((a,b) => b.score - a.score);
-  return candidates[0];
-}
-
-// Stato del rilevamento automatico: candidato attualmente osservato e da
-// quando lo è ininterrottamente, sia per la primissima individuazione
-// (candidate/since) sia per un cambio esercizio durante la sessione
-// (switchCandidate/switchSince, soglia più lunga per non cambiare esercizio
-// per un singolo fotogramma ambiguo mentre se ne sta già valutando uno).
-let autoDetectState = { candidate: null, since: null, switchCandidate: null, switchSince: null };
-const AUTO_DETECT_CONFIRM_MS = 800;
-const AUTO_SWITCH_CONFIRM_MS = 1400;
-
-function enterAutoWaitingState(){
-  appState = 'auto-waiting';
-  autoDetectState = { candidate: null, since: null, switchCandidate: null, switchSince: null };
-  calibOverlay.style.display = 'none';
-  recalibBtn.style.display = 'none';
-  repCounter.style.display = 'none';
-  timerCounter.style.display = 'none';
-  setStatus(false, "In attesa di riconoscere un esercizio… inizia a muoverti.");
-}
-
-function confirmAutoDetection(key){
-  autoDetectState.candidate = null;
-  autoDetectState.since = null;
-  autoDetectState.switchCandidate = null;
-  autoDetectState.switchSince = null;
-  selectExercise(key);
-  enterCalibratingState();
-  pushFeedback('Esercizio riconosciuto: ' + EXERCISES[key].label + '.', true);
-}
-
-// Cambio esercizio automatico mentre se ne sta già valutando uno (per chi
-// passa da un movimento all'altro senza più toccare lo schermo): richiede
-// una conferma più lunga di quella iniziale, per non scattare per un
-// fotogramma ambiguo a metà ripetizione.
-function maybeAutoSwitchExercise(lm, now){
-  const guess = classifyExercise(lm);
-  if(!guess || guess.key === currentExercise){
-    autoDetectState.switchCandidate = null;
-    autoDetectState.switchSince = null;
-    return;
-  }
-  if(autoDetectState.switchCandidate === guess.key){
-    if(now - autoDetectState.switchSince >= AUTO_SWITCH_CONFIRM_MS){
-      confirmAutoDetection(guess.key);
-    }
-  } else {
-    autoDetectState.switchCandidate = guess.key;
-    autoDetectState.switchSince = now;
-  }
-}
-
 // quanto il ginocchio supera la punta del piede lungo la direzione caviglia→punta (in unità di lunghezza del piede)
 function kneeOverToeRatio(ankle, knee, toe){
   if(!ankle || !knee || !toe) return null;
@@ -4471,29 +4329,6 @@ function renderLoop(){
     lastActiveTick = performance.now();
     return; // in pausa: fotocamera in anteprima, nessuna valutazione né conteggio
   }
-
-  if(appState === 'auto-waiting'){
-    if(hasPerson){
-      drawSkeleton(lm, true);
-      const guess = classifyExercise(lm);
-      if(guess && guess.key === autoDetectState.candidate){
-        const elapsed = now - autoDetectState.since;
-        setStatus(false, 'Riconoscimento in corso: sembra "' + EXERCISES[guess.key].label + '"… (' + Math.min(100, Math.round(elapsed/AUTO_DETECT_CONFIRM_MS*100)) + '%)');
-        if(elapsed >= AUTO_DETECT_CONFIRM_MS) confirmAutoDetection(guess.key);
-      } else {
-        autoDetectState.candidate = guess ? guess.key : null;
-        autoDetectState.since = guess ? now : null;
-        setStatus(false, guess ? ('Riconoscimento in corso: sembra "' + EXERCISES[guess.key].label + '"…') : "In attesa di riconoscere un esercizio… inizia a muoverti.");
-      }
-    } else {
-      autoDetectState.candidate = null;
-      autoDetectState.since = null;
-      setStatus(false, 'Nessuna persona rilevata — posizionati nell\'inquadratura');
-    }
-    return;
-  }
-
-  if(appMode === 'auto' && hasPerson) maybeAutoSwitchExercise(lm, now);
 
   if(appState === 'calibrating'){
     if(hasPerson){
@@ -4755,8 +4590,6 @@ startBtn.addEventListener('click', async () => {
 
   if(appMode === 'circuit'){
     startCircuit();
-  } else if(appMode === 'auto'){
-    enterAutoWaitingState();
   } else {
     repCounter.style.display = EXERCISES[currentExercise].mode === 'reps' ? 'flex' : 'none';
     timerCounter.style.display = EXERCISES[currentExercise].mode === 'timer' ? 'block' : 'none';
