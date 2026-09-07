@@ -1318,6 +1318,7 @@ let pairTimerSeconds = [0, 0];
 let pairExStates = [{}, {}];
 let pairFilterState = [{ lm: [], wlm: [] }, { lm: [], wlm: [] }];
 let pairLastHipX = [null, null]; // posizione orizzontale dell'anca nell'ultimo fotogramma in cui ciascuno slot era occupato: serve a riconoscere le due persone da un fotogramma all'altro senza un vero id
+let pairLastTorsoLen = [null, null]; // lunghezza torso (metri, 3D) media mobile per slot: tiebreaker quando la posizione da sola non basta più (vedi assignPairSlots)
 let pairLastTick = performance.now();
 // Come realtimeIssueSince/lastHoldOkAnnounce della modalità singola, ma un
 // paio di valori per persona: le due possono avere una forma scorretta in
@@ -4824,6 +4825,7 @@ function resetPairCounters(){
   pairExStates = [{}, {}];
   pairFilterState = [{ lm: [], wlm: [] }, { lm: [], wlm: [] }];
   pairLastHipX = [null, null];
+  pairLastTorsoLen = [null, null];
   pairRealtimeIssueSince = [null, null];
   pairRealtimeIssueAnnounced = [false, false];
   pairLastHoldOkAnnounce = [0, 0];
@@ -4858,39 +4860,88 @@ function updatePairCountersUI(){
 
 // Le due persone rilevate in un fotogramma non hanno un id stabile da parte
 // di MediaPipe: possono anche scambiarsi di ordine nell'array da un
-// fotogramma all'altro. Le si riconosce quindi dalla posizione orizzontale
-// dell'anca rispetto a dove si trovavano nell'ultimo fotogramma in cui erano
-// presenti — chi non ha ancora una posizione precedente (prima apparizione)
-// va nel primo slot libero, in ordine da sinistra a destra. Se le due
-// persone si scambiano fisicamente di posto, le etichette A/B potrebbero
-// scambiarsi con loro: limite noto di questa prima versione.
-function assignPairSlots(poses){
+// fotogramma all'altro. Le si riconosce quindi combinando due segnali
+// rispetto all'ultimo fotogramma in cui erano presenti: la posizione
+// orizzontale dell'anca (segnale principale) e la lunghezza del torso in
+// metri, dai landmark 3D quindi indipendente dalla distanza dalla
+// fotocamera (tiebreaker) — la corporatura di due persone diverse resta
+// spesso distinguibile anche nell'istante in cui si incrociano fisicamente,
+// quando la sola posizione non basterebbe più. Chi non ha ancora una storia
+// (prima apparizione) va nel primo slot libero, in ordine da sinistra a
+// destra. Limite noto residuo: se le due persone hanno anche una
+// corporatura molto simile, uno scambio di posto può ancora scambiare le
+// etichette A/B.
+const PAIR_TORSO_SCALE_M = 0.5; // lunghezza torso tipica di un adulto: normalizza il costo d'aspetto sulla stessa scala 0-1 di quello di posizione
+
+function torsoLength3D(wl){
+  const ls = wl[11], rs = wl[12], lh = wl[23], rh = wl[24];
+  if(!ls || !rs || !lh || !rh) return null;
+  const sx = (ls.x+rs.x)/2, sy = (ls.y+rs.y)/2, sz = (ls.z+rs.z)/2;
+  const hx = (lh.x+rh.x)/2, hy = (lh.y+rh.y)/2, hz = (lh.z+rh.z)/2;
+  return Math.hypot(sx-hx, sy-hy, sz-hz);
+}
+
+function pairMatchCost(slot, hipX, torsoLen){
+  let cost = 0;
+  if(pairLastHipX[slot] != null && hipX != null) cost += Math.abs(hipX - pairLastHipX[slot]);
+  if(pairLastTorsoLen[slot] != null && torsoLen != null) cost += Math.abs(torsoLen - pairLastTorsoLen[slot]) / PAIR_TORSO_SCALE_M;
+  return cost;
+}
+
+function assignPairSlots(poses, worldPoses){
   const hipXs = poses.map(p => {
     const l = p[23], r = p[24];
     return (l && r) ? (l.x + r.x) / 2 : null;
   });
+  const torsoLens = poses.map((_, j) => worldPoses[j] ? torsoLength3D(worldPoses[j]) : null);
+  const validIdx = [];
+  for(let j = 0; j < poses.length; j++) if(hipXs[j] != null) validIdx.push(j);
+
   const assignment = [null, null];
-  const used = new Array(poses.length).fill(false);
-  for(let slot = 0; slot < 2; slot++){
-    if(pairLastHipX[slot] == null) continue;
-    let bestIdx = -1, bestDist = Infinity;
-    for(let j = 0; j < poses.length; j++){
-      if(used[j] || hipXs[j] == null) continue;
-      const d = Math.abs(hipXs[j] - pairLastHipX[slot]);
-      if(d < bestDist){ bestDist = d; bestIdx = j; }
+  if(validIdx.length === 2 && pairLastHipX[0] != null && pairLastHipX[1] != null){
+    // Entrambi gli slot hanno già una storia: confronta le due sole
+    // assegnazioni possibili (diretta o scambiata) sul costo totale, invece
+    // di scegliere slot per slot in modo indipendente — è questo confronto
+    // congiunto che lascia intervenire l'aspetto proprio quando la
+    // posizione da sola non distinguerebbe più le due persone vicine.
+    const [i0, i1] = validIdx;
+    const costDirect = pairMatchCost(0, hipXs[i0], torsoLens[i0]) + pairMatchCost(1, hipXs[i1], torsoLens[i1]);
+    const costSwapped = pairMatchCost(0, hipXs[i1], torsoLens[i1]) + pairMatchCost(1, hipXs[i0], torsoLens[i0]);
+    if(costDirect <= costSwapped){ assignment[0] = i0; assignment[1] = i1; }
+    else { assignment[0] = i1; assignment[1] = i0; }
+  } else {
+    // Meno di due persone rilevate, o almeno uno slot senza storia ancora
+    // (prima volta): assegna per costo minimo chi ha già una posizione
+    // nota, poi chi resta va negli slot liberi in ordine da sinistra a destra.
+    const used = new Array(poses.length).fill(false);
+    for(let slot = 0; slot < 2; slot++){
+      if(pairLastHipX[slot] == null) continue;
+      let bestIdx = -1, bestCost = Infinity;
+      for(const j of validIdx){
+        if(used[j]) continue;
+        const c = pairMatchCost(slot, hipXs[j], torsoLens[j]);
+        if(c < bestCost){ bestCost = c; bestIdx = j; }
+      }
+      if(bestIdx >= 0){ assignment[slot] = bestIdx; used[bestIdx] = true; }
     }
-    if(bestIdx >= 0){ assignment[slot] = bestIdx; used[bestIdx] = true; }
+    const remaining = validIdx.filter(j => !used[j]).sort((a, b) => hipXs[a] - hipXs[b]);
+    for(const j of remaining){
+      const freeSlot = assignment[0] == null ? 0 : (assignment[1] == null ? 1 : null);
+      if(freeSlot == null) break; // già 2 persone assegnate: eventuali altre in inquadratura vengono ignorate
+      assignment[freeSlot] = j;
+    }
   }
-  const remaining = [];
-  for(let j = 0; j < poses.length; j++) if(!used[j] && hipXs[j] != null) remaining.push(j);
-  remaining.sort((a, b) => hipXs[a] - hipXs[b]);
-  for(const j of remaining){
-    const freeSlot = assignment[0] == null ? 0 : (assignment[1] == null ? 1 : null);
-    if(freeSlot == null) break; // già 2 persone assegnate: eventuali altre in inquadratura vengono ignorate
-    assignment[freeSlot] = j;
-  }
+
   for(let slot = 0; slot < 2; slot++){
-    pairLastHipX[slot] = assignment[slot] != null ? hipXs[assignment[slot]] : pairLastHipX[slot];
+    const idx = assignment[slot];
+    if(idx == null) continue;
+    pairLastHipX[slot] = hipXs[idx];
+    if(torsoLens[idx] != null){
+      // media mobile lenta: la corporatura non cambia da un fotogramma
+      // all'altro, un aggiornamento troppo reattivo la renderebbe un
+      // segnale rumoroso invece che stabile
+      pairLastTorsoLen[slot] = pairLastTorsoLen[slot] == null ? torsoLens[idx] : pairLastTorsoLen[slot] * 0.9 + torsoLens[idx] * 0.1;
+    }
   }
   return assignment;
 }
@@ -4925,7 +4976,7 @@ function announcePairRealtimeIssue(slot, evalResult){
 function renderPairFrame(result, now){
   const poses = result.landmarks || [];
   const worldPoses = result.worldLandmarks || [];
-  const assignment = assignPairSlots(poses);
+  const assignment = assignPairSlots(poses, worldPoses);
   const ex = EXERCISES[currentExercise];
   const dt = (now - pairLastTick) / 1000;
   pairLastTick = now;
