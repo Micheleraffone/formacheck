@@ -1134,6 +1134,31 @@ let poseLandmarker = null;
 let running = false;
 let lastVideoTime = -1;
 
+// Wake Lock: impedisce allo schermo di spegnersi durante l'allenamento — se
+// il telefono resta appoggiato senza essere toccato per un po' (tipico:
+// mani libere durante un circuito) altrimenti si spegnerebbe da solo a metà
+// serie, interrompendo la fotocamera. Il browser rilascia automaticamente
+// il lock quando la scheda va in background, quindi va richiesto di nuovo al
+// ritorno in primo piano se la sessione è ancora attiva.
+let wakeLock = null;
+async function requestWakeLock(){
+  if(!('wakeLock' in navigator)) return; // non supportato: l'allenamento funziona comunque, lo schermo potrà spegnersi da solo
+  try{
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch(err){
+    wakeLock = null; // negato o non disponibile in questo contesto (es. permessi, risparmio energetico): non blocca l'allenamento
+  }
+}
+async function releaseWakeLock(){
+  if(!wakeLock) return;
+  try{ await wakeLock.release(); } catch(err){ /* già rilasciato dal browser */ }
+  wakeLock = null;
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && running && !wakeLock) requestWakeLock();
+});
+
 // --- coordinate 3D e levigatura del movimento ---
 // Oltre ai punti 2D sull'immagine (lm), MediaPipe fornisce anche le stesse
 // articolazioni in coordinate 3D reali (in metri, relative alla fotocamera):
@@ -1396,6 +1421,42 @@ const REALTIME_ISSUE_MIN_MS = 350;
 let lastHoldOkAnnounce = 0;
 const HOLD_OK_ANNOUNCE_MS = 6000;
 
+// Rilevamento (approssimato) dell'apnea durante le tenute: il respiro sposta
+// di pochissimo la distanza spalle-anca, un segnale debole ma sufficiente ad
+// accorgersi che il torace è rimasto del tutto immobile per un tratto lungo
+// — tipico di chi trattiene il fiato sotto sforzo in plank/plank
+// laterale/sedia a muro. Non è una misura medica del respiro, solo un
+// promemoria via voce: usa i landmark 3D (metri) così la soglia di ampiezza
+// non dipende da quanto la persona è vicina o lontana dalla fotocamera.
+let breathSamples = [];
+let breathHoldWarnedAt = -Infinity; // nessun avviso ancora dato: il primo non deve aspettare il cooldown
+const BREATH_WINDOW_MS = 12000;       // quanto a lungo osservare prima di giudicare "fermo"
+const BREATH_MIN_AMPLITUDE = 0.006;   // metri: sotto questa oscillazione nella finestra, il torace non sta respirando visibilmente
+const BREATH_WARN_COOLDOWN_MS = 25000; // non ripetere il promemoria troppo spesso durante una tenuta lunga
+
+function resetBreathTracking(){
+  breathSamples = [];
+  breathHoldWarnedAt = -Infinity;
+}
+
+function trackBreathing(now){
+  const a = wlm;
+  if(!a || !a[11] || !a[12] || !a[23] || !a[24]) return;
+  const sx = (a[11].x + a[12].x) / 2, sy = (a[11].y + a[12].y) / 2, sz = (a[11].z + a[12].z) / 2;
+  const hx = (a[23].x + a[24].x) / 2, hy = (a[23].y + a[24].y) / 2, hz = (a[23].z + a[24].z) / 2;
+  const torsoLen = Math.hypot(sx - hx, sy - hy, sz - hz);
+  breathSamples.push({ t: now, v: torsoLen });
+  while(breathSamples.length && now - breathSamples[0].t > BREATH_WINDOW_MS) breathSamples.shift();
+  if(breathSamples.length < 10) return; // troppo pochi campioni per giudicare
+  if(now - breathSamples[0].t < BREATH_WINDOW_MS * 0.8) return; // finestra non ancora abbastanza piena
+  const values = breathSamples.map(s => s.v);
+  const amplitude = Math.max(...values) - Math.min(...values);
+  if(amplitude < BREATH_MIN_AMPLITUDE && now - breathHoldWarnedAt > BREATH_WARN_COOLDOWN_MS){
+    breathHoldWarnedAt = now;
+    pushFeedback('Ricorda di respirare: non trattenere il fiato durante la tenuta.', false);
+  }
+}
+
 function announceRealtimeIssue(evalResult){
   if(evalResult.ok){
     realtimeIssueSince = null;
@@ -1403,6 +1464,7 @@ function announceRealtimeIssue(evalResult){
     const ex = EXERCISES[currentExercise];
     if(ex && ex.mode === 'timer'){
       const now = performance.now();
+      trackBreathing(now);
       if(now - lastHoldOkAnnounce >= HOLD_OK_ANNOUNCE_MS){
         lastHoldOkAnnounce = now;
         pushFeedback('Posizione corretta, non muoverti.', true);
@@ -1410,6 +1472,7 @@ function announceRealtimeIssue(evalResult){
     }
     return;
   }
+  resetBreathTracking(); // la tenuta si è interrotta: il conteggio "fermo troppo a lungo" riparte da capo
   const now = performance.now();
   if(realtimeIssueSince == null) realtimeIssueSince = now;
   if(!realtimeIssueAnnounced && now - realtimeIssueSince >= REALTIME_ISSUE_MIN_MS){
@@ -1422,6 +1485,7 @@ function resetRealtimeIssueTracking(){
   realtimeIssueSince = null;
   realtimeIssueAnnounced = false;
   lastHoldOkAnnounce = 0;
+  resetBreathTracking();
 }
 
 // --- feedback vocale ---
@@ -3869,6 +3933,7 @@ function stopSession(){
 
   running = false;
   syncRecognition(); // ferma l'ascolto dei comandi vocali insieme alla sessione
+  releaseWakeLock();
   stopCameraStream();
   lastVideoTime = -1;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -4663,6 +4728,7 @@ startBtn.addEventListener('click', async () => {
   startBtn.textContent = 'In esecuzione';
   startBtn.disabled = true;
   syncRecognition(); // avvia l'ascolto dei comandi vocali, se attivati
+  requestWakeLock();
   renderLoop();
 
   if(appMode === 'circuit'){
