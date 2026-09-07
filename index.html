@@ -867,6 +867,7 @@
     <button class="btn" id="recalibBtn" style="display:none;">Ricalibra posizione</button>
     <button class="btn" id="thresholdCalibBtn" style="display:none;">Taratura soglie personalizzata</button>
     <div class="calib-status-note" id="thresholdCalibStatus" style="display:none;"></div>
+    <button class="btn" id="refPoseBtn" style="display:none;">👤 Postura di riferimento disattivata — tocca per attivare</button>
     <button class="btn" id="restBtn" style="display:none;">Inizia riposo</button>
     <button class="btn" id="circuitCancelBtn" style="display:none;">Termina circuito</button>
 
@@ -953,6 +954,7 @@ const calibSkip = document.getElementById('calibSkip');
 const recalibBtn = document.getElementById('recalibBtn');
 const thresholdCalibBtn = document.getElementById('thresholdCalibBtn');
 const thresholdCalibStatus = document.getElementById('thresholdCalibStatus');
+const refPoseBtn = document.getElementById('refPoseBtn');
 const thresholdCalibOverlay = document.getElementById('thresholdCalibOverlay');
 const thresholdCalibStepLabel = document.getElementById('thresholdCalibStepLabel');
 const thresholdCalibPrompt = document.getElementById('thresholdCalibPrompt');
@@ -1228,6 +1230,11 @@ function handleGoalReached(achievedLabel){
 // array di frasi: vengono mostrate insieme nella lista feedback ma pronunciate
 // una dopo l'altra in coda, senza sovrapporsi né interrompersi a vicenda.
 function completeRep(hadIssue, invalidMsg, validMsg){
+  // exState.phaseStart segna sempre l'inizio della fase conteggiata (ogni
+  // esercizio a ripetizioni lo imposta prima di chiamare completeRep), quindi
+  // qui è già disponibile la durata dell'intera ripetizione appena conclusa,
+  // senza che ciascun esercizio debba calcolarla e passarla esplicitamente.
+  const repDurationMs = exState.phaseStart != null ? performance.now() - exState.phaseStart : null;
   if(hadIssue){
     invalidRepCount++;
     const parts = Array.isArray(invalidMsg) ? invalidMsg : [invalidMsg || 'Ripetizione non conteggiata: correggi la forma e riprova.'];
@@ -1236,8 +1243,25 @@ function completeRep(hadIssue, invalidMsg, validMsg){
     pushFeedbackSequence(parts, false);
   } else {
     incrementRep();
+    checkRepTempo(repDurationMs);
     if(validMsg) pushFeedback(validMsg, true);
   }
+}
+
+// Rileva quando l'utente accelera bruscamente rispetto al proprio ritmo
+// abituale su QUESTO esercizio — un segnale di scatti/perdita di controllo
+// diverso dal controllo "troppo veloce per essere reale" già esistente
+// (quello usa una soglia fissa assoluta, questo si adatta al ritmo di
+// ciascuno). La media si azzera a ogni cambio esercizio/serie insieme al
+// resto di exState, quindi non confronta mai ritmi di esercizi diversi.
+const REP_TEMPO_MIN_SAMPLES = 3; // sotto queste ripetizioni non c'è ancora un ritmo di riferimento affidabile
+function checkRepTempo(durationMs){
+  if(durationMs == null) return;
+  if(exState.repTempoEma != null && (exState.repTempoSamples || 0) >= REP_TEMPO_MIN_SAMPLES && durationMs < exState.repTempoEma * 0.45){
+    pushFeedback('Stai accelerando rispetto al tuo ritmo abituale: rallenta e controlla il movimento.', false);
+  }
+  exState.repTempoSamples = (exState.repTempoSamples || 0) + 1;
+  exState.repTempoEma = exState.repTempoEma == null ? durationMs : exState.repTempoEma * 0.7 + durationMs * 0.3;
 }
 
 // Il motivo di scarto più frequente nella sessione corrente (per il riepilogo).
@@ -2802,20 +2826,22 @@ function loadSavedThresholds(){
     if(!raw) return;
     const saved = JSON.parse(raw);
     Object.keys(saved).forEach(key => {
-      if(EXERCISES[key] && EXERCISES[key].thresholds && saved[key] && saved[key].thresholds){
+      if(!EXERCISES[key] || !saved[key]) return;
+      if(EXERCISES[key].thresholds && saved[key].thresholds){
         Object.assign(EXERCISES[key].thresholds, saved[key].thresholds);
       }
+      if(saved[key].refPose) EXERCISES[key].refPose = saved[key].refPose;
     });
   } catch(e){
     // localStorage non disponibile (es. modalità privata) o dati corrotti: si prosegue con le soglie di default
   }
 }
 
-function saveThresholds(key){
+function saveThresholds(key, refPose){
   try{
     const raw = localStorage.getItem(THRESH_STORAGE_KEY);
     const saved = raw ? JSON.parse(raw) : {};
-    saved[key] = { thresholds: EXERCISES[key].thresholds, calibratedAt: new Date().toISOString() };
+    saved[key] = { thresholds: EXERCISES[key].thresholds, calibratedAt: new Date().toISOString(), refPose: refPose || (saved[key] && saved[key].refPose) };
     localStorage.setItem(THRESH_STORAGE_KEY, JSON.stringify(saved));
   } catch(e){
     // storage non disponibile: le soglie personalizzate restano valide solo per questa sessione
@@ -3039,6 +3065,7 @@ function updateThresholdCalibStatus(){
   if(!ex.calib){
     thresholdCalibBtn.style.display = 'none';
     thresholdCalibStatus.style.display = 'none';
+    refPoseBtn.style.display = 'none';
     return;
   }
   thresholdCalibBtn.style.display = 'block';
@@ -3051,6 +3078,8 @@ function updateThresholdCalibStatus(){
   } else {
     thresholdCalibStatus.style.display = 'none';
   }
+  refPoseBtn.style.display = ex.refPose ? 'block' : 'none';
+  updateRefPoseBtn();
 }
 
 // --- wizard di taratura soglie personalizzate ---
@@ -3095,6 +3124,7 @@ function finishThresholdCalibration(){
     return out;
   });
   const success = ex.calib.apply(avgs, ex.thresholds);
+  const refPose = threshCalib.refPose;
   threshCalib = null;
   thresholdCalibOverlay.style.display = 'none';
   appState = 'active';
@@ -3103,7 +3133,8 @@ function finishThresholdCalibration(){
   if(success === false){
     pushFeedback('Calibrazione non riuscita: il movimento tra i due passi era troppo simile. Riprova assicurandoti di muoverti chiaramente tra le due posizioni.', false);
   } else {
-    saveThresholds(currentExercise);
+    ex.refPose = refPose || ex.refPose;
+    saveThresholds(currentExercise, refPose);
     updateThresholdCalibStatus();
     pushFeedback('Soglie personalizzate salvate per questo esercizio.', true);
   }
@@ -3111,6 +3142,27 @@ function finishThresholdCalibration(){
 
 thresholdCalibBtn.addEventListener('click', startThresholdCalibration);
 thresholdCalibCancel.addEventListener('click', cancelThresholdCalibration);
+
+// Il pulsante "postura di riferimento" compare solo per gli esercizi che
+// hanno già una posa di riferimento salvata (serve prima la taratura
+// soglie); è un confronto visivo puramente opzionale, spento di default.
+const REF_POSE_ENABLED_KEY = 'formacheck_refpose_v1';
+let refPoseEnabled = false;
+try{ refPoseEnabled = localStorage.getItem(REF_POSE_ENABLED_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
+
+function updateRefPoseBtn(){
+  refPoseBtn.textContent = refPoseEnabled
+    ? '👤 Postura di riferimento attiva — tocca per disattivare'
+    : '👤 Postura di riferimento disattivata — tocca per attivare';
+  refPoseBtn.classList.toggle('primary', refPoseEnabled);
+}
+updateRefPoseBtn();
+
+refPoseBtn.addEventListener('click', () => {
+  refPoseEnabled = !refPoseEnabled;
+  updateRefPoseBtn();
+  try{ localStorage.setItem(REF_POSE_ENABLED_KEY, refPoseEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
+});
 
 // --- timer di riposo ---
 function playBeep(){
@@ -4018,6 +4070,79 @@ function checkCalibration(lm){
   return { states, allPass };
 }
 
+// --- postura di riferimento (overlay) ---
+// Alla fine dell'ultimo passo di taratura soglie (la posizione "corretta" —
+// per lo squat, ad es., lo squat più profondo considerato corretto) si
+// salva anche la posa intera, non solo gli angoli usati per le soglie.
+// Viene normalizzata rispetto al centro anche e alla lunghezza del busto,
+// così può essere ridisegnata in scala e posizione corrette per QUALSIASI
+// inquadratura successiva (persona più vicina/lontana, spostata nel
+// fotogramma), non solo per quella usata durante la calibrazione.
+const REF_POSE_JOINTS = [0,11,12,13,14,15,16,23,24,25,26,27,28];
+function normalizePoseForOverlay(lm){
+  const hipL = lm[23], hipR = lm[24], shL = lm[11], shR = lm[12];
+  if(!hipL || !hipR || !shL || !shR) return null;
+  const hipMidX = (hipL.x + hipR.x) / 2, hipMidY = (hipL.y + hipR.y) / 2;
+  const shMidX = (shL.x + shR.x) / 2, shMidY = (shL.y + shR.y) / 2;
+  const torsoLen = Math.hypot(shMidX - hipMidX, shMidY - hipMidY);
+  if(!torsoLen) return null;
+  const out = {};
+  REF_POSE_JOINTS.forEach(i => {
+    const p = lm[i];
+    if(!p) return;
+    out[i] = { x: (p.x - hipMidX) / torsoLen, y: (p.y - hipMidY) / torsoLen };
+  });
+  return out;
+}
+
+// Disegna la posa di riferimento come scheletro "fantasma" tratteggiato,
+// riproiettato sul centro anche e la scala del busto CORRENTI (non quelli
+// della calibrazione): così appare nella stessa posizione/scala relativa
+// della persona inquadrata ora, qualunque sia la sua distanza dalla
+// fotocamera. Va disegnato prima dello scheletro live, che deve restare
+// sempre il più leggibile dei due.
+function drawReferenceOverlay(lm, refPose){
+  if(!refPose) return;
+  const hipL = lm[23], hipR = lm[24], shL = lm[11], shR = lm[12];
+  if(!hipL || !hipR || !shL || !shR) return;
+  const hipMidX = (hipL.x + hipR.x) / 2, hipMidY = (hipL.y + hipR.y) / 2;
+  const shMidX = (shL.x + shR.x) / 2, shMidY = (shL.y + shR.y) / 2;
+  const torsoLen = Math.hypot(shMidX - hipMidX, shMidY - hipMidY);
+  if(!torsoLen) return;
+  const w = canvas.width, h = canvas.height;
+  const project = (i) => {
+    const p = refPose[i];
+    if(!p) return null;
+    return { x: (hipMidX + p.x * torsoLen) * w, y: (hipMidY + p.y * torsoLen) * h };
+  };
+  const connections = [
+    [11,12],[11,23],[12,24],[23,24],
+    [11,13],[13,15],[12,14],[14,16],
+    [23,25],[25,27],[24,26],[26,28]
+  ];
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = '#c9ff3d';
+  ctx.setLineDash([5, 5]);
+  ctx.lineWidth = 3;
+  connections.forEach(([a,b]) => {
+    const pa = project(a), pb = project(b);
+    if(!pa || !pb) return;
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.stroke();
+  });
+  const head = project(0);
+  if(head){
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(head.x, head.y, 11, 0, Math.PI*2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawSkeleton(lm, ok){
   const w = canvas.width, h = canvas.height;
   const color = ok ? '#3ddc84' : '#ff5c5c';
@@ -4151,6 +4276,13 @@ function renderLoop(){
         thresholdCalibBar.style.width = Math.min(100, (elapsed/THRESH_HOLD_MS)*100) + '%';
         if(elapsed >= THRESH_HOLD_MS){
           threshCalib.results.push(threshCalib.stepSamples);
+          // L'ultimo passo di calibrazione è la posizione "corretta" di
+          // riferimento (per lo squat, ad es., lo squat più profondo
+          // considerato corretto): ne salviamo anche la posa completa, non
+          // solo gli angoli, per poterla ridisegnare in overlay più avanti.
+          if(threshCalib.stepIndex === ex.calib.steps.length - 1){
+            threshCalib.refPose = normalizePoseForOverlay(lm);
+          }
           threshCalib.stepIndex++;
           if(threshCalib.stepIndex >= ex.calib.steps.length){
             finishThresholdCalibration();
@@ -4215,6 +4347,7 @@ function renderLoop(){
       activeElapsedMs += activeTickNow - lastActiveTick;
       lastActiveTick = activeTickNow;
 
+      if(refPoseEnabled) drawReferenceOverlay(lm, ex.refPose);
       drawSkeleton(lm, evalResult.ok);
       setStatus(evalResult.ok, evalResult.statusMsg);
       announceRealtimeIssue(evalResult);
