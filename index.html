@@ -900,8 +900,6 @@
       <div class="section-label">Comando vocale</div>
       <button class="btn" id="voiceCommandBtn" style="width:100%;">🎙️ Comando vocale disattivato — tocca per attivare</button>
       <div class="calib-status-note" id="voiceCommandHint" style="display:none; margin-top:8px;">Di' "avanti" per passare all'esercizio successivo nel circuito, "salta" per saltare il riposo, "pausa"/"riprendi" per fermarti e ripartire — senza toccare lo schermo.</div>
-      <button class="btn" id="neuralSttBtn" style="width:100%; margin-top:8px; display:none;">🧠 Riconoscimento locale (sperimentale) disattivato — tocca per attivare</button>
-      <div class="calib-status-note" id="neuralSttHint" style="display:none; margin-top:8px;">Riconosce i comandi con un modello calcolato interamente sul telefono, invece di affidarsi al servizio del browser: funziona anche offline dopo il primo download (qualche decina di MB) e non invia l'audio a nessun server. Un po' meno reattivo di quello nativo (analizza brevi finestre audio invece di ascoltare in continuo).</div>
     </div>
 
     <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
@@ -1050,8 +1048,6 @@ const captionsBtn = document.getElementById('captionsBtn');
 const captionOverlay = document.getElementById('captionOverlay');
 const voiceCommandBtn = document.getElementById('voiceCommandBtn');
 const voiceCommandHint = document.getElementById('voiceCommandHint');
-const neuralSttBtn = document.getElementById('neuralSttBtn');
-const neuralSttHint = document.getElementById('neuralSttHint');
 
 const modeSelect = document.getElementById('modeSelect');
 const singleModeSection = document.getElementById('singleModeSection');
@@ -2039,13 +2035,6 @@ const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRec
 const voiceCommandSupported = !!SpeechRecognitionCtor;
 let voiceCommandEnabled = false;
 try{ voiceCommandEnabled = voiceCommandSupported && localStorage.getItem(VOICE_COMMAND_STORAGE_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
-// Dichiarata già qui (non più sotto, insieme al resto del modulo Whisper)
-// perché updateVoiceCommandBtn() la legge tramite updateNeuralSttBtn() fin
-// dalla primissima chiamata, sincrona, in fondo a questa stessa sezione —
-// prima di questa riga darebbe "accesso prima dell'inizializzazione".
-const NEURAL_STT_STORAGE_KEY = 'formacheck_neuralstt_v1';
-let neuralSttEnabled = false;
-try{ neuralSttEnabled = voiceCommandSupported && localStorage.getItem(NEURAL_STT_STORAGE_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
 let recognition = null;
 let recognitionListening = false;
 let recognitionDeniedWarned = false;
@@ -2055,7 +2044,6 @@ function updateVoiceCommandBtn(){
     voiceCommandBtn.disabled = true;
     voiceCommandBtn.textContent = '🎙️ Comando vocale non supportato su questo browser';
     voiceCommandHint.style.display = 'none';
-    updateNeuralSttBtn();
     return;
   }
   voiceCommandBtn.textContent = voiceCommandEnabled
@@ -2063,7 +2051,6 @@ function updateVoiceCommandBtn(){
     : '🎙️ Comando vocale disattivato — tocca per attivare';
   voiceCommandBtn.classList.toggle('primary', voiceCommandEnabled);
   voiceCommandHint.style.display = voiceCommandEnabled ? 'block' : 'none';
-  updateNeuralSttBtn();
 }
 updateVoiceCommandBtn();
 
@@ -2073,7 +2060,7 @@ updateVoiceCommandBtn();
 // proprio feedback vocale dagli altoparlanti e scambiarlo per un comando:
 // alcune frasi di correzione contengono parole come "avanti").
 function shouldListenForCommands(){
-  return voiceCommandEnabled && !neuralSttEnabled && running && !speechBusy;
+  return voiceCommandEnabled && running && !speechBusy;
 }
 
 function ensureRecognition(){
@@ -2152,169 +2139,6 @@ voiceCommandBtn.addEventListener('click', () => {
   updateVoiceCommandBtn();
   try{ localStorage.setItem(VOICE_COMMAND_STORAGE_KEY, voiceCommandEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
   syncRecognition();
-  if(!voiceCommandEnabled) stopWhisperListening();
-  else if(neuralSttEnabled) startWhisperListening();
-});
-
-// --- riconoscimento vocale locale (sperimentale, opzionale) ---
-// Whisper "tiny" (multilingua), eseguito interamente nel browser via
-// transformers.js/WebAssembly, invece del riconoscimento nativo del browser
-// (che su Chrome/Android invia l'audio ai server di Google per la
-// trascrizione). Va scaricato il modello al primo utilizzo (circa 40MB) —
-// per questo resta un'opzione a parte, spenta di default, disponibile solo
-// quando il comando vocale è già attivo. A differenza di quello nativo (un
-// ascolto continuo in streaming), analizza a turno brevi finestre audio
-// registrate una alla volta: un po' meno reattivo, compromesso accettabile
-// per funzionare offline e senza inviare l'audio a nessun server.
-const WHISPER_MODULE_URL = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
-const WHISPER_CHUNK_MS = 3200;
-let whisperPipelinePromise = null;
-let whisperLoadFailed = false;
-let whisperStream = null;
-
-async function ensureWhisperReady(){
-  if(whisperLoadFailed) return null;
-  if(!whisperPipelinePromise){
-    whisperPipelinePromise = (async () => {
-      const { pipeline } = await import(WHISPER_MODULE_URL);
-      return await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny');
-    })().catch(err => {
-      whisperLoadFailed = true;
-      console.warn('Riconoscimento vocale locale non disponibile, resto su quello nativo:', err);
-      return null;
-    });
-  }
-  return whisperPipelinePromise;
-}
-
-// Whisper richiede l'audio grezzo a 16kHz mono: la registrazione dal
-// microfono arriva invece alla frequenza/canali del dispositivo, quindi va
-// ricampionata prima di passarla al modello (validato con test sintetici:
-// preserva durata e frequenza, gestisce stereo->mono e l'ingresso già a 16kHz).
-function mixToMonoAudio(buffer){
-  if(buffer.numberOfChannels === 1) return buffer.getChannelData(0);
-  const len = buffer.length;
-  const out = new Float32Array(len);
-  for(let c = 0; c < buffer.numberOfChannels; c++){
-    const data = buffer.getChannelData(c);
-    for(let i = 0; i < len; i++) out[i] += data[i] / buffer.numberOfChannels;
-  }
-  return out;
-}
-function resampleTo16kMono(buffer){
-  const targetRate = 16000;
-  const mono = mixToMonoAudio(buffer);
-  if(buffer.sampleRate === targetRate) return mono.slice();
-  const ratio = buffer.sampleRate / targetRate;
-  const newLength = Math.round(mono.length / ratio);
-  const result = new Float32Array(newLength);
-  for(let i = 0; i < newLength; i++){
-    const srcIndex = i * ratio;
-    const i0 = Math.floor(srcIndex);
-    const i1 = Math.min(i0 + 1, mono.length - 1);
-    const frac = srcIndex - i0;
-    result[i] = mono[i0] * (1 - frac) + mono[i1] * frac;
-  }
-  return result;
-}
-
-// Come shouldListenForCommands(), ma per il percorso neurale: i due non
-// ascoltano mai insieme (si escludono a vicenda nella rispettiva condizione).
-function shouldListenForCommandsNeural(){
-  return voiceCommandEnabled && neuralSttEnabled && running && !speechBusy;
-}
-
-async function startWhisperListening(){
-  if(whisperStream) return;
-  const ready = await ensureWhisperReady();
-  if(!ready){
-    neuralSttEnabled = false;
-    updateNeuralSttBtn();
-    try{ localStorage.setItem(NEURAL_STT_STORAGE_KEY, '0'); } catch(e){ /* storage non disponibile */ }
-    pushFeedback('Riconoscimento vocale locale non disponibile su questo dispositivo/browser: resto su quello nativo.', false);
-    syncRecognition();
-    return;
-  }
-  try{
-    whisperStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch(e){
-    neuralSttEnabled = false;
-    updateNeuralSttBtn();
-    try{ localStorage.setItem(NEURAL_STT_STORAGE_KEY, '0'); } catch(err){ /* storage non disponibile */ }
-    pushFeedback('Microfono non autorizzato per il riconoscimento locale.', false);
-    syncRecognition();
-    return;
-  }
-  recordWhisperChunk();
-}
-
-function stopWhisperListening(){
-  if(whisperStream){
-    whisperStream.getTracks().forEach(t => t.stop());
-    whisperStream = null;
-  }
-}
-
-function recordWhisperChunk(){
-  if(!neuralSttEnabled || !whisperStream) return;
-  if(!shouldListenForCommandsNeural()){
-    setTimeout(recordWhisperChunk, 400);
-    return;
-  }
-  let recorder;
-  try{ recorder = new MediaRecorder(whisperStream); }
-  catch(e){ console.warn('Registrazione locale non disponibile:', e); return; }
-  const chunks = [];
-  recorder.ondataavailable = (e) => { if(e.data.size > 0) chunks.push(e.data); };
-  recorder.onstop = async () => {
-    try{
-      if(chunks.length && whisperStream){ // whisperStream potrebbe essere stato fermato nel frattempo
-        const blob = new Blob(chunks, { type: recorder.mimeType });
-        const arrayBuf = await blob.arrayBuffer();
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        const audioCtx = new AudioCtx();
-        const decoded = await audioCtx.decodeAudioData(arrayBuf);
-        audioCtx.close();
-        const pcm = resampleTo16kMono(decoded);
-        const pipelineFn = await whisperPipelinePromise;
-        if(pipelineFn && whisperStream){
-          const result = await pipelineFn(pcm, { language: 'italian', task: 'transcribe' });
-          if(result && result.text) handleVoiceCommand(result.text);
-        }
-      }
-    } catch(err){
-      console.warn('Trascrizione locale non riuscita su questo pezzo audio:', err);
-    } finally {
-      recordWhisperChunk(); // pianifica il prossimo pezzo, condizioni permettendo
-    }
-  };
-  try{ recorder.start(); }
-  catch(e){ setTimeout(recordWhisperChunk, 500); return; }
-  setTimeout(() => { if(recorder.state !== 'inactive') recorder.stop(); }, WHISPER_CHUNK_MS);
-}
-
-function updateNeuralSttBtn(){
-  const show = voiceCommandSupported && voiceCommandEnabled;
-  neuralSttBtn.style.display = show ? 'block' : 'none';
-  neuralSttHint.style.display = (show && neuralSttEnabled) ? 'block' : 'none';
-  neuralSttBtn.textContent = neuralSttEnabled
-    ? '🧠 Riconoscimento locale (sperimentale) attivo — tocca per disattivare'
-    : '🧠 Riconoscimento locale (sperimentale) disattivato — tocca per attivare';
-  neuralSttBtn.classList.toggle('primary', neuralSttEnabled);
-}
-
-neuralSttBtn.addEventListener('click', async () => {
-  neuralSttEnabled = !neuralSttEnabled;
-  updateNeuralSttBtn();
-  try{ localStorage.setItem(NEURAL_STT_STORAGE_KEY, neuralSttEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
-  syncRecognition(); // ferma quello nativo, se stava ascoltando
-  if(neuralSttEnabled){
-    pushFeedback('Preparazione riconoscimento locale in corso, il primo utilizzo può richiedere qualche secondo…', true);
-    startWhisperListening();
-  } else {
-    stopWhisperListening();
-    syncRecognition(); // eventualmente riprende quello nativo
-  }
 });
 
 // --- registro esercizi ---
@@ -4545,7 +4369,6 @@ function stopSession(){
   running = false;
   stopPairMode();
   syncRecognition(); // ferma l'ascolto dei comandi vocali insieme alla sessione
-  stopWhisperListening(); // idem per l'ascolto locale, se era in corso
   releaseWakeLock();
   stopCameraStream();
   lastVideoTime = -1;
@@ -5813,7 +5636,6 @@ startBtn.addEventListener('click', async () => {
     startPairMode();
   } else {
     syncRecognition(); // avvia l'ascolto dei comandi vocali, se attivati
-    if(neuralSttEnabled) startWhisperListening(); // idem per l'ascolto locale, se scelto al posto di quello nativo
     renderLoop();
     if(appMode === 'circuit'){
       startCircuit();
