@@ -666,6 +666,20 @@
   }
   .history-chart-bar.has-data{ background:linear-gradient(180deg, var(--accent), var(--accent-dim)); }
   .history-chart-label{ font-size:9px; color:var(--ink-faint); }
+
+  /* Isola il report settimanale quando si stampa (o si salva come PDF dal
+     dialogo di stampa del browser): nasconde tutto il resto della pagina,
+     forzando colori chiari su sfondo bianco indipendentemente dal tema
+     scelto in app — un report è pensato per essere letto su carta. */
+  @media print{
+    body *{ visibility:hidden; }
+    #weeklyReportOverlay, #weeklyReportOverlay *{ visibility:visible; }
+    #weeklyReportOverlay{
+      position:absolute; top:0; left:0; width:100%; height:auto;
+      background:#fff; color:#111;
+    }
+    #weeklyReportOverlay .calib-skip{ display:none; }
+  }
 </style>
 </head>
 <body>
@@ -789,9 +803,19 @@
       <div id="historyChart" style="width:100%; max-width:340px;"></div>
       <div id="historyList" style="width:100%; max-width:340px; max-height:36vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
       <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
+        <button class="calib-skip" id="weeklyReportBtn">📄 Report settimanale</button>
         <button class="calib-skip" id="historyExportBtn">Esporta</button>
         <button class="calib-skip" id="historyClearBtn">Cancella cronologia</button>
         <button class="calib-skip" id="historyCloseBtn">Chiudi</button>
+      </div>
+    </div>
+    <div class="calib-overlay" id="weeklyReportOverlay" style="display:none;">
+      <div class="calib-title">Report settimanale</div>
+      <div id="weeklyReportBody" style="width:100%; max-width:360px; max-height:56vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px; text-align:left;"></div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
+        <button class="calib-skip" id="weeklyReportShareBtn">Condividi</button>
+        <button class="calib-skip" id="weeklyReportPrintBtn">Stampa / PDF</button>
+        <button class="calib-skip" id="weeklyReportCloseBtn">Chiudi</button>
       </div>
     </div>
     <div class="calib-overlay" id="onboardingOverlay" style="display:none;">
@@ -1009,6 +1033,8 @@
       <span>s</span>
     </div>
     <div class="calib-status-note" id="clusterHint" style="display:none; margin-top:0; margin-bottom:8px;">Suddivide la serie in mini-blocchi con una breve pausa tra uno e l'altro, invece di ripetizioni continue: aiuta a mantenere la potenza alta invece di lasciarla calare per la fatica, come nel "cluster training" usato nell'allenamento della forza esplosiva.</div>
+    <button class="btn" id="periodizationBtn" style="width:100%; display:none;" title="Alterna automaticamente accumulo, intensificazione e scarico su un ciclo di 4 settimane, scalando il traguardo base di una percentuale fissa per settimana. Si compone con l'autoregolazione APRE, se attiva anche quella.">🗓️ Periodizzazione disattivata — tocca per attivare</button>
+    <div class="calib-status-note" id="periodizationBadge" style="display:none; margin-top:8px; margin-bottom:8px;"></div>
     <div id="singleRestPresetWrap" style="display:none;">
       <div class="section-label">Riposo tra le serie</div>
       <div class="cam-select" id="singleRestPresetSelect">
@@ -1164,6 +1190,12 @@ const wellnessSaveBtn = document.getElementById('wellnessSaveBtn');
 const wellnessBadge = document.getElementById('wellnessBadge');
 const historyChart = document.getElementById('historyChart');
 const historyList = document.getElementById('historyList');
+const weeklyReportBtn = document.getElementById('weeklyReportBtn');
+const weeklyReportOverlay = document.getElementById('weeklyReportOverlay');
+const weeklyReportBody = document.getElementById('weeklyReportBody');
+const weeklyReportShareBtn = document.getElementById('weeklyReportShareBtn');
+const weeklyReportPrintBtn = document.getElementById('weeklyReportPrintBtn');
+const weeklyReportCloseBtn = document.getElementById('weeklyReportCloseBtn');
 const historyExportBtn = document.getElementById('historyExportBtn');
 const historyClearBtn = document.getElementById('historyClearBtn');
 const historyCloseBtn = document.getElementById('historyCloseBtn');
@@ -1179,6 +1211,8 @@ const clusterConfigRow = document.getElementById('clusterConfigRow');
 const clusterSizeInput = document.getElementById('clusterSizeInput');
 const clusterRestInput = document.getElementById('clusterRestInput');
 const clusterHint = document.getElementById('clusterHint');
+const periodizationBtn = document.getElementById('periodizationBtn');
+const periodizationBadge = document.getElementById('periodizationBadge');
 const singleRestPresetWrap = document.getElementById('singleRestPresetWrap');
 
 // Piccole icone SVG in stile lineare (coerenti con l'estetica tecnica
@@ -1503,6 +1537,19 @@ try{ clusterEnabled = localStorage.getItem(CLUSTER_STORAGE_KEY) === '1'; } catch
 let clusterSize = 2; // ripetizioni per mini-blocco
 let clusterRestSeconds = 15;
 
+// Periodizzazione settimanale (sperimentale): vedi currentPeriodizationPhase
+// più sotto. Disattivata di default.
+const PERIODIZATION_STORAGE_KEY = 'formacheck_periodization_v1';
+let periodizationEnabled = false;
+let periodizationStartTs = null;
+try{
+  const savedPeriodization = JSON.parse(localStorage.getItem(PERIODIZATION_STORAGE_KEY) || 'null');
+  if(savedPeriodization){
+    periodizationEnabled = !!savedPeriodization.enabled;
+    periodizationStartTs = savedPeriodization.startTs || null;
+  }
+} catch(e){ /* storage non disponibile */ }
+
 const VIEW_META = {
   laterale: { icon:'◐', title:'Vista laterale' },
   frontale: { icon:'◯', title:'Vista frontale' },
@@ -1512,8 +1559,51 @@ const VIEW_META = {
 // Traguardo ripetizioni effettivo della serie corrente: quello configurato,
 // a meno che l'autoregolazione APRE (se attiva) lo abbia sovrascritto per
 // questa serie — vedi apreAdjustGoal.
+// --- periodizzazione settimanale (sperimentale) ---
+// Struttura a blocchi usata realmente nella programmazione della forza:
+// invece di un traguardo fisso per settimane, un ciclo di 4 settimane
+// alterna accumulo (volume in aumento), intensificazione (settimana più
+// dura) e scarico (volume ridotto per il recupero) — un pattern lineare
+// classico, non un protocollo con un nome specifico. Il traguardo
+// configurato (repGoal) resta la base "di riferimento": ogni settimana lo
+// scala di una percentuale fissa, mostrata come stato ma non modificabile
+// direttamente qui (si modifica il traguardo base con l'input consueto).
+// Si compone con l'autoregolazione APRE: se entrambe sono attive, prima si
+// applica la percentuale della settimana, poi l'eventuale aggiustamento tra
+// una serie e l'altra.
+const PERIODIZATION_PHASES = [
+  { name: 'Accumulo', multiplier: 1.00, note: 'settimana di base' },
+  { name: 'Accumulo', multiplier: 1.05, note: 'volume in leggero aumento' },
+  { name: 'Intensificazione', multiplier: 1.10, note: 'settimana più impegnativa' },
+  { name: 'Scarico', multiplier: 0.60, note: 'settimana di recupero attivo' }
+];
+
+function currentPeriodizationPhase(){
+  if(!periodizationEnabled || periodizationStartTs == null) return null;
+  const daysSince = Math.floor((Date.now() - periodizationStartTs) / 86400000);
+  if(daysSince < 0) return null;
+  const weekNumber = Math.floor(daysSince / 7);
+  const phase = PERIODIZATION_PHASES[weekNumber % PERIODIZATION_PHASES.length];
+  return {
+    name: phase.name,
+    multiplier: phase.multiplier,
+    note: phase.note,
+    weekInCycle: (weekNumber % PERIODIZATION_PHASES.length) + 1,
+    cycleLength: PERIODIZATION_PHASES.length
+  };
+}
+
+// Traguardo base dopo la scala di periodizzazione (se attiva), prima
+// dell'eventuale aggiustamento APRE.
+function periodizedBaseGoal(){
+  const phase = currentPeriodizationPhase();
+  if(!phase) return repGoal;
+  return Math.max(1, Math.round(repGoal * phase.multiplier));
+}
+
 function effectiveRepGoal(){
-  return (apreEnabled && apreGoalOverride != null) ? apreGoalOverride : repGoal;
+  const base = periodizedBaseGoal();
+  return (apreEnabled && apreGoalOverride != null) ? apreGoalOverride : base;
 }
 
 function incrementRep(){
@@ -2562,6 +2652,40 @@ function trackLungeSymmetry(isLeft, minKnee){
   }
 }
 
+// --- Limb Symmetry Index (semplificato), per il mountain climber ---
+// Stesso principio di trackLungeSymmetry (vedi sopra): confronta la
+// profondità raggiunta — qui l'angolo minimo del ginocchio in movimento,
+// più basso = più vicino al petto = meglio — tra gamba sinistra e destra
+// nella sessione corrente. Funzione separata invece di condividere quella
+// del lunge: stessa logica, ma soglie e messaggio propri, sullo stesso
+// pattern già usato da esercizi come Russian Twist e Ginocchia alte per la
+// propria asimmetria.
+const MC_LSI_MIN_REPS_PER_SIDE = 3;
+const MC_LSI_RATIO_THRESHOLD = 0.85;
+function trackMountainClimberSymmetry(isLeft, minKnee){
+  if(exState.lsiLeftSum === undefined){
+    exState.lsiLeftSum = 0; exState.lsiLeftCount = 0;
+    exState.lsiRightSum = 0; exState.lsiRightCount = 0;
+    exState.lsiWarned = false;
+  }
+  if(isLeft){ exState.lsiLeftSum += minKnee; exState.lsiLeftCount++; }
+  else { exState.lsiRightSum += minKnee; exState.lsiRightCount++; }
+
+  if(exState.lsiWarned) return;
+  if(exState.lsiLeftCount < MC_LSI_MIN_REPS_PER_SIDE || exState.lsiRightCount < MC_LSI_MIN_REPS_PER_SIDE) return;
+  const leftAvgAngle = exState.lsiLeftSum / exState.lsiLeftCount;
+  const rightAvgAngle = exState.lsiRightSum / exState.lsiRightCount;
+  const leftDepth = 180 - leftAvgAngle;
+  const rightDepth = 180 - rightAvgAngle;
+  const stronger = Math.max(leftDepth, rightDepth);
+  const weaker = Math.min(leftDepth, rightDepth);
+  if(stronger > 0 && weaker / stronger < MC_LSI_RATIO_THRESHOLD){
+    exState.lsiWarned = true;
+    const weakerSide = leftDepth < rightDepth ? 'sinistro' : 'destro';
+    pushFeedback('Ginocchio ' + weakerSide + ' meno vicino al petto rispetto all\'altro: possibile squilibrio tra i due lati.', false);
+  }
+}
+
 // --- registro esercizi ---
 const EXERCISES = {
   squat: {
@@ -3122,13 +3246,18 @@ const EXERCISES = {
         exState.repHadIssue = false;
         exState.issueSince = null;
         exState.phaseStart = performance.now();
+        exState.repWorkingLeft = !extendedIsLeft; // il ginocchio "in movimento" è quello opposto a quello disteso
+        exState.repMinKnee = workingKnee;
       } else if(exState.phase === 'in'){
         trackFormIssue(issues.length > 0, issues[0]);
+        if(workingKnee < exState.repMinKnee) exState.repMinKnee = workingKnee;
         if(workingKnee > 150){
           exState.phase = 'out';
           const tooFast = repTooFast(exState.phaseStart);
           const invalidParts = tooFast ? 'Movimento troppo rapido o instabile: ripetizione non conteggiata.' : rejectRepSequence(exState.lastIssueMsg);
-          completeRep(exState.repHadIssue || tooFast, invalidParts, 'Buona spinta del ginocchio, bacino stabile.');
+          const hadIssue = exState.repHadIssue || tooFast;
+          completeRep(hadIssue, invalidParts, 'Buona spinta del ginocchio, bacino stabile.');
+          if(!hadIssue) trackMountainClimberSymmetry(exState.repWorkingLeft, exState.repMinKnee);
           exState.repHadIssue = false;
           exState.issueSince = null;
         }
@@ -4909,6 +5038,7 @@ function updateGoalUI(){
     repGoalRow.style.display = 'none'; setBadge.style.display = 'none'; singleRestPresetWrap.style.display = 'none';
     apreBtn.style.display = 'none'; apreHint.style.display = 'none';
     clusterBtn.style.display = 'none'; clusterConfigRow.style.display = 'none'; clusterHint.style.display = 'none';
+    periodizationBtn.style.display = 'none'; periodizationBadge.style.display = 'none';
     return;
   }
   const ex = EXERCISES[currentExercise];
@@ -4925,6 +5055,7 @@ function updateGoalUI(){
   updateSetBadge();
   updateApreBtn();
   updateClusterBtn();
+  updatePeriodizationBtn();
 }
 
 // L'autoregolazione APRE ha senso solo con più serie dello stesso esercizio
@@ -4989,6 +5120,37 @@ function triggerClusterRest(){
     exState = {}; // fa ripartire pulita la fase interna, senza toccare conteggio/serie/traguardo
   });
 }
+
+function savePeriodizationState(){
+  try{
+    localStorage.setItem(PERIODIZATION_STORAGE_KEY, JSON.stringify({ enabled: periodizationEnabled, startTs: periodizationStartTs }));
+  } catch(e){ /* storage non disponibile */ }
+}
+
+function updatePeriodizationBtn(){
+  const ex = EXERCISES[currentExercise];
+  const show = appMode === 'single' && ex.mode === 'reps';
+  periodizationBtn.style.display = show ? 'block' : 'none';
+  periodizationBtn.textContent = periodizationEnabled
+    ? '🗓️ Periodizzazione attiva — tocca per disattivare'
+    : '🗓️ Periodizzazione disattivata — tocca per attivare';
+  periodizationBtn.classList.toggle('primary', periodizationEnabled);
+
+  const phase = (show && periodizationEnabled) ? currentPeriodizationPhase() : null;
+  if(!phase){ periodizationBadge.style.display = 'none'; return; }
+  periodizationBadge.style.display = 'block';
+  const pct = Math.round((phase.multiplier - 1) * 100);
+  const pctLabel = pct === 0 ? 'invariato' : (pct > 0 ? '+' + pct + '%' : pct + '%');
+  periodizationBadge.textContent = '📅 Settimana ' + phase.weekInCycle + ' di ' + phase.cycleLength + ' — ' + phase.name
+    + ' (traguardo ' + pctLabel + ', ' + phase.note + ')';
+}
+
+periodizationBtn.addEventListener('click', () => {
+  periodizationEnabled = !periodizationEnabled;
+  if(periodizationEnabled && periodizationStartTs == null) periodizationStartTs = Date.now(); // avvia il ciclo da oggi, solo la prima volta
+  savePeriodizationState();
+  updatePeriodizationBtn();
+});
 
 repGoalInput.addEventListener('change', () => {
   const val = Math.max(1, parseInt(repGoalInput.value, 10) || 1);
@@ -5348,6 +5510,126 @@ function exportHistory(){
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+// --- report settimanale ---
+// Un vero "report da allenatore": lo stesso genere di pagina che uno staff
+// di preparazione atletica prepara ogni settimana per rivedere un atleta —
+// carico (ACWR), benessere (Hooper Index), periodizzazione ed eventuale
+// raccomandazione di scarico, più l'elenco delle sessioni della settimana.
+// Riusa dati e funzioni già esistenti altrove nell'app: nessun calcolo
+// nuovo, solo un'unica vista di sintesi, esportabile via stampa/PDF
+// (window.print(), nessuna libreria esterna) o condivisione testuale.
+function buildWeeklyReportData(){
+  const now = Date.now();
+  const DAY = 86400000;
+  const entries = loadHistory().filter(e => now - e.ts <= 7 * DAY).sort((a, b) => b.ts - a.ts);
+
+  const totals = { sessions: entries.length, validReps: 0, activeMs: 0, kcal: 0 };
+  entries.forEach(e => {
+    totals.validReps += e.valid || 0;
+    totals.activeMs += e.activeMs || 0;
+    totals.kcal += estimateKcal(e.key, e.activeMs || 0);
+  });
+
+  return {
+    periodFrom: new Date(now - 7 * DAY),
+    periodTo: new Date(now),
+    entries,
+    totals,
+    acwr: computeACWR(),
+    wellness: wellnessTrend(),
+    periodization: currentPeriodizationPhase(),
+    deload: computeDeloadRecommendation()
+  };
+}
+
+function showWeeklyReport(){
+  const data = buildWeeklyReportData();
+  weeklyReportBody.innerHTML = '';
+
+  const addRow = (label, value) => {
+    const row = document.createElement('div');
+    row.className = 'circuit-summary-row';
+    row.innerHTML = '<span>' + label + '</span><span>' + value + '</span>';
+    weeklyReportBody.appendChild(row);
+  };
+  const addHeading = (text) => {
+    const h = document.createElement('div');
+    h.className = 'section-label';
+    h.style.marginTop = '8px';
+    h.textContent = text;
+    weeklyReportBody.appendChild(h);
+  };
+  const dateFmt = (d) => d.toLocaleDateString('it-IT');
+
+  let reportText = '📋 FormaCheck — Report settimanale\n';
+  reportText += dateFmt(data.periodFrom) + ' – ' + dateFmt(data.periodTo) + '\n\n';
+
+  addHeading('Riepilogo settimana');
+  addRow('Sessioni', data.totals.sessions);
+  addRow('Ripetizioni valide totali', data.totals.validReps);
+  addRow('Tempo sotto sforzo', formatRestTime(Math.round(data.totals.activeMs / 1000)));
+  reportText += data.totals.sessions + ' sessioni, ' + data.totals.validReps + ' ripetizioni valide, '
+    + formatRestTime(Math.round(data.totals.activeMs / 1000)) + ' sotto sforzo';
+  if(data.totals.kcal >= 1){
+    addRow('Calorie stimate', '~' + Math.round(data.totals.kcal) + ' kcal');
+    reportText += ', ~' + Math.round(data.totals.kcal) + ' kcal stimate';
+  }
+  reportText += '\n';
+
+  if(data.acwr){
+    const zone = acwrZone(data.acwr.ratio);
+    addHeading('Carico di allenamento (ACWR)');
+    addRow('Carico settimanale', Math.round(data.acwr.acute) + ' AU');
+    addRow('Rapporto vs media 4 settimane', data.acwr.ratio.toFixed(2) + ' — ' + zone.label);
+    reportText += '\nACWR: ' + data.acwr.ratio.toFixed(2) + ' (' + zone.label + ')\n';
+  }
+
+  if(data.wellness){
+    addHeading('Benessere (Hooper Index)');
+    addRow('Oggi', data.wellness.todayScore + '/28' + (data.wellness.note ? ' — ' + data.wellness.note : ''));
+    reportText += 'Benessere oggi: ' + data.wellness.todayScore + '/28' + (data.wellness.note ? ' (' + data.wellness.note + ')' : '') + '\n';
+  }
+
+  if(data.periodization){
+    addHeading('Periodizzazione');
+    addRow('Settimana in corso', data.periodization.weekInCycle + ' di ' + data.periodization.cycleLength + ' — ' + data.periodization.name);
+    reportText += 'Periodizzazione: settimana ' + data.periodization.weekInCycle + '/' + data.periodization.cycleLength + ' (' + data.periodization.name + ')\n';
+  }
+
+  if(data.deload){
+    addHeading('Raccomandazione');
+    const note = document.createElement('div');
+    note.className = 'calib-status-note';
+    note.textContent = data.deload.label;
+    weeklyReportBody.appendChild(note);
+    reportText += '\n' + data.deload.label + '\n';
+  }
+
+  addHeading('Sessioni della settimana');
+  if(data.entries.length === 0){
+    const empty = document.createElement('div');
+    empty.className = 'calib-hint';
+    empty.textContent = 'Nessuna sessione registrata negli ultimi 7 giorni.';
+    weeklyReportBody.appendChild(empty);
+    reportText += '\nNessuna sessione registrata negli ultimi 7 giorni.\n';
+  } else {
+    data.entries.forEach(e => {
+      const detail = e.mode === 'reps'
+        ? (e.valid || 0) + ' valide' + (e.invalid ? ' / ' + e.invalid + ' scartate' : '')
+        : formatRestTime(e.seconds || 0);
+      addRow(new Date(e.ts).toLocaleDateString('it-IT') + ' — ' + (e.label || e.key), detail);
+      reportText += new Date(e.ts).toLocaleDateString('it-IT') + ' — ' + (e.label || e.key) + ': ' + detail + '\n';
+    });
+  }
+
+  weeklyReportOverlay.style.display = 'flex';
+  weeklyReportShareBtn.onclick = () => shareText(reportText);
+  weeklyReportPrintBtn.onclick = () => window.print();
+  weeklyReportCloseBtn.onclick = () => { weeklyReportOverlay.style.display = 'none'; };
+}
+
+weeklyReportBtn.addEventListener('click', showWeeklyReport);
 
 // Condivide un testo con la condivisione nativa del telefono (WhatsApp,
 // Messaggi, ecc.); se non disponibile lo copia negli appunti come riserva.
