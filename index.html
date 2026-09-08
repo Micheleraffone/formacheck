@@ -741,6 +741,11 @@
     <div class="calib-overlay" id="sessionSummaryOverlay" style="display:none;">
       <div class="calib-title">Riepilogo</div>
       <div id="sessionSummaryBody" style="width:100%; max-width:280px; display:flex; flex-direction:column; gap:10px;"></div>
+      <div id="rpeRow" style="width:100%; max-width:280px; display:none; flex-direction:column; gap:6px; align-items:center;">
+        <div class="section-label">Quanto è stata dura? (RPE 0-10)</div>
+        <div id="rpeButtons" style="display:flex; gap:4px; flex-wrap:wrap; justify-content:center;"></div>
+        <div class="calib-status-note" id="rpeLoadNote" style="display:none; margin-top:2px;"></div>
+      </div>
       <div style="display:flex; gap:10px;">
         <button class="calib-skip" id="sessionSummaryShareBtn">Condividi</button>
         <button class="calib-skip" id="sessionSummaryCloseBtn">Chiudi</button>
@@ -762,6 +767,7 @@
           <span>kg</span>
         </div>
         <div id="caloriesTotalBadge" class="calib-status-note" style="display:none;"></div>
+        <div id="acwrBadge" class="calib-status-note" style="display:none;" title="Rapporto tra il carico di allenamento dell'ultima settimana e la media delle ultime 4 settimane (Acute:Chronic Workload Ratio). Zona 0.8-1.3: aumento di carico prudente. Sopra 1.5: la letteratura sportiva associa un salto così rapido a un rischio di infortunio maggiore. Richiede di aver valutato lo sforzo (RPE) di almeno qualche sessione."></div>
       </div>
       <div id="historyChart" style="width:100%; max-width:340px;"></div>
       <div id="historyList" style="width:100%; max-width:340px; max-height:36vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
@@ -977,6 +983,15 @@
     <div class="calib-status-note" id="setBadge" style="display:none; text-align:center;"></div>
     <button class="btn" id="apreBtn" style="width:100%; display:none;">🎯 Autoregolazione APRE disattivata — tocca per attivare</button>
     <div class="calib-status-note" id="apreHint" style="display:none; margin-top:8px; margin-bottom:8px;">Tra una serie e l'altra, alza o abbassa in automatico il traguardo di ripetizioni della serie successiva in base a come è andata quella appena conclusa (qualità della forma e velocità di esecuzione) — un'autoregolazione ispirata al protocollo APRE usato nello strength &amp; conditioning. Richiede almeno 2 serie.</div>
+    <button class="btn" id="clusterBtn" style="width:100%; display:none;">🔄 Cluster set disattivato — tocca per attivare</button>
+    <div id="clusterConfigRow" style="display:none; align-items:center; justify-content:center; gap:8px; font-size:11.5px; color:var(--ink-dim); padding:6px 0;">
+      <span>Ogni</span>
+      <input type="number" id="clusterSizeInput" min="1" value="2" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
+      <span>rip. pausa di</span>
+      <input type="number" id="clusterRestInput" min="5" value="15" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
+      <span>s</span>
+    </div>
+    <div class="calib-status-note" id="clusterHint" style="display:none; margin-top:0; margin-bottom:8px;">Suddivide la serie in mini-blocchi con una breve pausa tra uno e l'altro, invece di ripetizioni continue: aiuta a mantenere la potenza alta invece di lasciarla calare per la fatica, come nel "cluster training" usato nell'allenamento della forza esplosiva.</div>
     <div id="singleRestPresetWrap" style="display:none;">
       <div class="section-label">Riposo tra le serie</div>
       <div class="cam-select" id="singleRestPresetSelect">
@@ -1105,6 +1120,9 @@ const sessionSummaryOverlay = document.getElementById('sessionSummaryOverlay');
 const sessionSummaryBody = document.getElementById('sessionSummaryBody');
 const sessionSummaryShareBtn = document.getElementById('sessionSummaryShareBtn');
 const sessionSummaryCloseBtn = document.getElementById('sessionSummaryCloseBtn');
+const rpeRow = document.getElementById('rpeRow');
+const rpeButtons = document.getElementById('rpeButtons');
+const rpeLoadNote = document.getElementById('rpeLoadNote');
 const recordBadge = document.getElementById('recordBadge');
 const recurringErrorBadge = document.getElementById('recurringErrorBadge');
 const historyBtn = document.getElementById('historyBtn');
@@ -1119,6 +1137,7 @@ const goalProgressBar = document.getElementById('goalProgressBar');
 const goalProgressLabel = document.getElementById('goalProgressLabel');
 const bodyWeightInput = document.getElementById('bodyWeightInput');
 const caloriesTotalBadge = document.getElementById('caloriesTotalBadge');
+const acwrBadge = document.getElementById('acwrBadge');
 const historyChart = document.getElementById('historyChart');
 const historyList = document.getElementById('historyList');
 const historyExportBtn = document.getElementById('historyExportBtn');
@@ -1131,6 +1150,11 @@ const setsGoalInput = document.getElementById('setsGoalInput');
 const setBadge = document.getElementById('setBadge');
 const apreBtn = document.getElementById('apreBtn');
 const apreHint = document.getElementById('apreHint');
+const clusterBtn = document.getElementById('clusterBtn');
+const clusterConfigRow = document.getElementById('clusterConfigRow');
+const clusterSizeInput = document.getElementById('clusterSizeInput');
+const clusterRestInput = document.getElementById('clusterRestInput');
+const clusterHint = document.getElementById('clusterHint');
 const singleRestPresetWrap = document.getElementById('singleRestPresetWrap');
 
 // Piccole icone SVG in stile lineare (coerenti con l'estetica tecnica
@@ -1442,6 +1466,19 @@ let apreGoalOverride = null; // traguardo della serie corrente, quando l'autoreg
 let apreSetQualityStart = 0; // indice in qualityRepScores da cui inizia la serie corrente
 let apreSetVbtStart = 0; // indice in vbtRepPeaks da cui inizia la serie corrente
 
+// Session-RPE (metodo di Foster): valore 0-10 scelto nel riepilogo di fine
+// sessione, prima che venga salvato nello storico. Vedi computeSessionLoad
+// e logSessionIfActive più sotto.
+let pendingSessionRPE = null;
+
+// Cluster set (rest-redistribution): vedi triggerClusterRest più sotto.
+// Disattivato di default.
+const CLUSTER_STORAGE_KEY = 'formacheck_cluster_v1';
+let clusterEnabled = false;
+try{ clusterEnabled = localStorage.getItem(CLUSTER_STORAGE_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
+let clusterSize = 2; // ripetizioni per mini-blocco
+let clusterRestSeconds = 15;
+
 const VIEW_META = {
   laterale: { icon:'◐', title:'Vista laterale' },
   frontale: { icon:'◯', title:'Vista frontale' },
@@ -1465,6 +1502,11 @@ function incrementRep(){
   if(!circuitActive && EXERCISES[currentExercise].mode === 'reps' && (repCount - setBaseline) === effectiveRepGoal() && !exState.goalCelebrated){
     exState.goalCelebrated = true;
     handleGoalReached(effectiveRepGoal() + ' ripetizioni');
+  } else if(clusterEnabled && !circuitActive && EXERCISES[currentExercise].mode === 'reps' && !exState.goalCelebrated){
+    const doneInSet = repCount - setBaseline;
+    if(doneInSet > 0 && doneInSet % clusterSize === 0 && doneInSet < effectiveRepGoal()){
+      triggerClusterRest();
+    }
   }
   if(circuitActive && !isResting && repCount >= circuitList[circuitIndex].target){
     triggerCircuitAdvance();
@@ -3666,6 +3708,18 @@ function clearHistory(){
 
 // Salva nello storico l'attività dell'esercizio corrente, se ce n'è stata
 // (chiamare SEMPRE prima di azzerare repCount/invalidRepCount/timerSeconds).
+// --- Session-RPE Training Load (metodo di Foster) ---
+// Uno dei metodi più usati nello sport professionistico per monitorare la
+// fatica accumulata: dopo la sessione, l'atleta valuta lo sforzo percepito
+// da 0 a 10 (RPE), moltiplicato per la durata in minuti dà un "carico di
+// allenamento" in unità arbitrarie (AU) — nessun sensore necessario, solo
+// una domanda e una moltiplicazione. Vedi computeACWR più sotto per come
+// viene usato nel tempo.
+function computeSessionLoad(){
+  if(pendingSessionRPE == null) return null;
+  return Math.round(pendingSessionRPE * (activeElapsedMs / 60000));
+}
+
 function logSessionIfActive(){
   const ex = EXERCISES[currentExercise];
   if(!ex) return;
@@ -3692,7 +3746,11 @@ function logSessionIfActive(){
     avgQuality: sessionAvgQuality() ?? undefined,
     // Velocità di esecuzione media della sessione (vedi trackVbtFrame):
     // assente per gli esercizi a timer (una tenuta non ha rep da misurare).
-    avgVelocityMps: sessionAvgVbtVelocity() ?? undefined
+    avgVelocityMps: sessionAvgVbtVelocity() ?? undefined,
+    // Session-RPE (metodo di Foster): assente se l'utente ha chiuso il
+    // riepilogo senza valutare lo sforzo percepito.
+    sessionRPE: pendingSessionRPE ?? undefined,
+    sessionLoad: computeSessionLoad() ?? undefined
   });
 }
 
@@ -3873,6 +3931,47 @@ function renderGoalPanel(){
   } else {
     caloriesTotalBadge.style.display = 'none';
   }
+  renderAcwrBadge();
+}
+
+// --- Acute:Chronic Workload Ratio (ACWR) ---
+// Metodologia reale di gestione del carico usata negli sport di squadra
+// professionistici (es. Gabbett et al.): rapporto tra il carico di
+// allenamento dell'ultima settimana (acuto) e la media delle ultime 4
+// settimane (cronico), calcolato sui valori di Session-RPE già registrati.
+// Un aumento troppo rapido del carico rispetto a quanto l'atleta era
+// abituato — un rapporto fuori dalla "zona ottimale" 0.8-1.3, e soprattutto
+// sopra 1.5 — è associato in letteratura a un rischio di infortunio
+// maggiore. Richiede che almeno alcune sessioni abbiano un carico
+// registrato (l'utente deve aver valutato lo sforzo percepito).
+function computeACWR(){
+  const hist = loadHistory().filter(e => e.sessionLoad != null);
+  if(!hist.length) return null;
+  const now = Date.now();
+  const DAY_MS = 86400000;
+  const loadInLastDays = (days) => hist
+    .filter(e => now - e.ts <= days * DAY_MS)
+    .reduce((sum, e) => sum + e.sessionLoad, 0);
+  const acute = loadInLastDays(7);
+  const chronic = loadInLastDays(28) / 4;
+  if(chronic <= 0) return null;
+  return { acute, chronic, ratio: acute / chronic };
+}
+
+function acwrZone(ratio){
+  if(ratio < 0.8) return { label: 'Carico basso rispetto alle ultime settimane', color: 'var(--ink-dim)' };
+  if(ratio <= 1.3) return { label: 'Zona di carico prudente', color: 'var(--ok)' };
+  if(ratio <= 1.5) return { label: 'Attenzione: carico in aumento rapido', color: 'var(--warn)' };
+  return { label: 'Rischio infortunio aumentato: carico salito troppo rispetto alle ultime settimane', color: 'var(--bad)' };
+}
+
+function renderAcwrBadge(){
+  const acwr = computeACWR();
+  if(!acwr){ acwrBadge.style.display = 'none'; return; }
+  const zone = acwrZone(acwr.ratio);
+  acwrBadge.style.display = 'block';
+  acwrBadge.style.color = zone.color;
+  acwrBadge.textContent = '⚖️ Carico settimanale: ' + Math.round(acwr.acute) + ' AU (rapporto ' + acwr.ratio.toFixed(2) + ' vs media 4 settimane) — ' + zone.label;
 }
 
 goalWeeklyInput.addEventListener('change', () => {
@@ -4604,7 +4703,12 @@ function selectExercise(key){
 // modalità singolo esercizio; in modalità circuito il traguardo è già gestito
 // per esercizio dal circuito stesso, quindi qui resta nascosto.
 function updateGoalUI(){
-  if(appMode !== 'single'){ repGoalRow.style.display = 'none'; setBadge.style.display = 'none'; singleRestPresetWrap.style.display = 'none'; apreBtn.style.display = 'none'; apreHint.style.display = 'none'; return; }
+  if(appMode !== 'single'){
+    repGoalRow.style.display = 'none'; setBadge.style.display = 'none'; singleRestPresetWrap.style.display = 'none';
+    apreBtn.style.display = 'none'; apreHint.style.display = 'none';
+    clusterBtn.style.display = 'none'; clusterConfigRow.style.display = 'none'; clusterHint.style.display = 'none';
+    return;
+  }
   const ex = EXERCISES[currentExercise];
   repGoalRow.style.display = 'flex';
   if(ex.mode === 'reps'){
@@ -4618,6 +4722,7 @@ function updateGoalUI(){
   singleRestPresetWrap.style.display = setsGoal > 1 ? 'block' : 'none';
   updateSetBadge();
   updateApreBtn();
+  updateClusterBtn();
 }
 
 // L'autoregolazione APRE ha senso solo con più serie dello stesso esercizio
@@ -4639,6 +4744,49 @@ apreBtn.addEventListener('click', () => {
   if(!apreEnabled) apreGoalOverride = null; // torna subito al traguardo configurato manualmente
   updateApreBtn();
 });
+
+// --- cluster set (rest-redistribution) ---
+// Invece di ripetizioni continue fino al traguardo, la serie si spezza in
+// mini-blocchi con una breve pausa tra uno e l'altro: mantiene la velocità e
+// la potenza alte per tutta la serie invece di lasciarle calare per la
+// fatica accumulata — il principio del "cluster training" usato
+// nell'allenamento della forza esplosiva. Solo per esercizi a ripetizioni;
+// la pausa riusa lo stesso timer di riposo tra le serie, ma senza avanzare
+// alla serie successiva né toccare il traguardo.
+function updateClusterBtn(){
+  const ex = EXERCISES[currentExercise];
+  const show = appMode === 'single' && ex.mode === 'reps';
+  clusterBtn.style.display = show ? 'block' : 'none';
+  clusterConfigRow.style.display = (show && clusterEnabled) ? 'flex' : 'none';
+  clusterHint.style.display = (show && clusterEnabled) ? 'block' : 'none';
+  clusterBtn.textContent = clusterEnabled
+    ? '🔄 Cluster set attivo — tocca per disattivare'
+    : '🔄 Cluster set disattivato — tocca per attivare';
+  clusterBtn.classList.toggle('primary', clusterEnabled);
+}
+
+clusterBtn.addEventListener('click', () => {
+  clusterEnabled = !clusterEnabled;
+  try{ localStorage.setItem(CLUSTER_STORAGE_KEY, clusterEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
+  updateClusterBtn();
+});
+
+clusterSizeInput.addEventListener('change', () => {
+  clusterSize = Math.max(1, parseInt(clusterSizeInput.value, 10) || 2);
+  clusterSizeInput.value = clusterSize;
+});
+
+clusterRestInput.addEventListener('change', () => {
+  clusterRestSeconds = Math.max(5, parseInt(clusterRestInput.value, 10) || 15);
+  clusterRestInput.value = clusterRestSeconds;
+});
+
+function triggerClusterRest(){
+  pushFeedback('🔄 Pausa cluster: ' + clusterRestSeconds + 's prima del prossimo mini-blocco.', true);
+  startRestTimer(clusterRestSeconds, 'Prossimo blocco', () => {
+    exState = {}; // fa ripartire pulita la fase interna, senza toccare conteggio/serie/traguardo
+  });
+}
 
 repGoalInput.addEventListener('change', () => {
   const val = Math.max(1, parseInt(repGoalInput.value, 10) || 1);
@@ -4704,6 +4852,7 @@ loadSavedThresholds();
 loadPairThresholds();
 buildExerciseButtons();
 buildMetricRows();
+buildRpeButtons();
 updateViewBadge();
 updateMuscleDisplay();
 updateHowto();
@@ -4729,6 +4878,8 @@ function resetMetrics(){
   apreGoalOverride = null;
   apreSetQualityStart = 0;
   apreSetVbtStart = 0;
+  pendingSessionRPE = null;
+  rpeRow.style.display = 'none';
   activeElapsedMs = 0;
   lastActiveTick = performance.now();
   feedbackList.innerHTML = '';
@@ -4855,12 +5006,49 @@ function showSessionSummary(onClose){
     summaryText += '\n' + setsDone + '/' + setsGoal + ' serie completate';
   }
 
+  pendingSessionRPE = null;
+  rpeRow.style.display = 'flex';
+  updateRpeSelection();
+
   sessionSummaryOverlay.style.display = 'flex';
   sessionSummaryShareBtn.onclick = () => shareText(summaryText);
   sessionSummaryCloseBtn.onclick = () => {
     sessionSummaryOverlay.style.display = 'none';
     onClose();
   };
+}
+
+// Costruita una sola volta all'avvio: 11 pulsanti (0-10) per la Session-RPE
+// nel riepilogo di fine sessione.
+function buildRpeButtons(){
+  rpeButtons.innerHTML = '';
+  for(let i = 0; i <= 10; i++){
+    const btn = document.createElement('button');
+    btn.className = 'cam-btn';
+    btn.style.minWidth = '30px';
+    btn.style.padding = '6px 4px';
+    btn.textContent = String(i);
+    btn.dataset.rpe = String(i);
+    btn.addEventListener('click', () => {
+      pendingSessionRPE = i;
+      updateRpeSelection();
+    });
+    rpeButtons.appendChild(btn);
+  }
+}
+
+function updateRpeSelection(){
+  Array.from(rpeButtons.children).forEach(btn => {
+    btn.classList.toggle('active', Number(btn.dataset.rpe) === pendingSessionRPE);
+  });
+  const load = computeSessionLoad();
+  if(load != null){
+    const minutes = activeElapsedMs / 60000;
+    rpeLoadNote.style.display = 'block';
+    rpeLoadNote.textContent = 'Carico sessione: ' + load + ' AU (RPE ' + pendingSessionRPE + ' × ' + minutes.toFixed(1) + ' min)';
+  } else {
+    rpeLoadNote.style.display = 'none';
+  }
 }
 
 // --- cronologia allenamenti (vista) ---
