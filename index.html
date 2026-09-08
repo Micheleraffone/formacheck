@@ -958,6 +958,10 @@
       </div>
     </div>
 
+    <div id="pairQualityRow" style="display:none; text-align:center; padding-bottom:6px; font-size:11.5px; color:var(--ink-dim);" title="Punteggio euristico: combina pulizia della forma e scorrevolezza del movimento fotogramma per fotogramma. Non è un modello di intelligenza artificiale addestrato su dati reali.">
+      Qualità movimento (euristica) — A: <span id="pairQualityA" style="font-weight:700; color:var(--ink);">—</span> · B: <span id="pairQualityB" style="font-weight:700; color:var(--ink);">—</span>
+    </div>
+
     <div id="repGoalRow" style="display:none; align-items:center; justify-content:center; gap:8px; font-size:11.5px; color:var(--ink-dim); padding-bottom:4px; flex-wrap:wrap;">
       <span>Traguardo</span>
       <input type="number" id="repGoalInput" min="1" value="10" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
@@ -1060,6 +1064,9 @@ const pairModeNote = document.getElementById('pairModeNote');
 const pairCountersRow = document.getElementById('pairCountersRow');
 const pairNumA = document.getElementById('pairNumA');
 const pairNumB = document.getElementById('pairNumB');
+const pairQualityRow = document.getElementById('pairQualityRow');
+const pairQualityA = document.getElementById('pairQualityA');
+const pairQualityB = document.getElementById('pairQualityB');
 const pairCalibSection = document.getElementById('pairCalibSection');
 const pairCalibBtnA = document.getElementById('pairCalibBtnA');
 const pairCalibBtnB = document.getElementById('pairCalibBtnB');
@@ -1362,6 +1369,14 @@ let pairLastTick = performance.now();
 let pairRealtimeIssueSince = [null, null];
 let pairRealtimeIssueAnnounced = [false, false];
 let pairLastHoldOkAnnounce = [0, 0];
+// Punteggio qualità del movimento (vedi trackQualityFrame più sotto), un
+// tracker indipendente per slot: le due persone possono avere una forma
+// diversa nello stesso istante, quindi non possono condividere lo stato
+// usato dalla modalità a una persona.
+function makeQualityTracker(){
+  return { clean: 0, dirty: 0, all: 0, jerk: 0, lastVal: null, lastTime: null, timerLastSampleAt: null, scores: [] };
+}
+let pairQuality = [makeQualityTracker(), makeQualityTracker()];
 
 let facingMode = 'environment';
 let appState = 'idle'; // idle | calibrating | active
@@ -1456,6 +1471,7 @@ function completeRep(hadIssue, invalidMsg, validMsg){
   // la coda vocale invece di aiutare.
   if(pairModeActive){
     const label = PAIR_STYLES[pairActiveSlot].label;
+    recordPairQualitySample(pairActiveSlot); // chiude il punteggio qualità della ripetizione di QUESTA persona
     if(hadIssue){
       pairInvalidCounts[pairActiveSlot]++;
     } else {
@@ -5310,6 +5326,8 @@ function resetPairCounters(){
   pairRealtimeIssueSince = [null, null];
   pairRealtimeIssueAnnounced = [false, false];
   pairLastHoldOkAnnounce = [0, 0];
+  pairQuality = [makeQualityTracker(), makeQualityTracker()];
+  updatePairQualityBadge();
   updatePairCountersUI();
 }
 
@@ -5330,6 +5348,7 @@ function startPairMode(){
 function stopPairMode(){
   pairModeActive = false;
   pairCountersRow.style.display = 'none';
+  pairQualityRow.style.display = 'none';
 }
 
 function updatePairCountersUI(){
@@ -5337,6 +5356,74 @@ function updatePairCountersUI(){
   const format = (i) => ex.mode === 'timer' ? formatRestTime(Math.floor(pairTimerSeconds[i])) : String(pairRepCounts[i]);
   pairNumA.textContent = format(0);
   pairNumB.textContent = format(1);
+}
+
+// Equivalente per la modalità coppia di trackQualityFrame/recordQualitySample
+// (vedi lì per la spiegazione del punteggio euristico): stessa logica, ma
+// con un tracker indipendente per slot invece delle variabili globali usate
+// dalla modalità a una persona, dato che qui le due persone avanzano in
+// parallelo nello stesso fotogramma.
+function trackPairQualityFrame(slot, evalResult){
+  const q = pairQuality[slot];
+  if(evalResult.ok === true){ q.clean++; q.all++; }
+  else if(evalResult.ok === false){ q.dirty++; q.all++; }
+
+  const primary = evalResult.metrics && evalResult.metrics[0];
+  const isAngle = primary && typeof primary.value === 'string' && primary.value.endsWith('°');
+  const now = performance.now();
+  if(isAngle){
+    const numeric = parseFloat(primary.value);
+    if(!isNaN(numeric)){
+      if(q.lastVal != null && q.lastTime != null){
+        const dt = (now - q.lastTime) / 1000;
+        if(dt > 0 && dt < 0.5 && Math.abs(numeric - q.lastVal) / dt > QUALITY_JERK_DEG_PER_S) q.jerk++;
+      }
+      q.lastVal = numeric;
+      q.lastTime = now;
+    }
+  }
+
+  if(EXERCISES[currentExercise].mode === 'timer'){
+    if(q.timerLastSampleAt == null) q.timerLastSampleAt = now;
+    if(now - q.timerLastSampleAt >= 1000){
+      recordPairQualitySample(slot);
+      q.timerLastSampleAt = now;
+    }
+  }
+}
+
+function recordPairQualitySample(slot){
+  const q = pairQuality[slot];
+  const totalVerdicts = q.clean + q.dirty;
+  let score = null;
+  if(totalVerdicts > 0){
+    const cleanRatio = q.clean / totalVerdicts;
+    const jerkRatio = q.all > 0 ? q.jerk / q.all : 0;
+    const smoothScore = Math.max(0, 1 - jerkRatio * 4);
+    score = Math.round(Math.max(0, Math.min(100, cleanRatio * 70 + smoothScore * 30)));
+    q.scores.push(score);
+    updatePairQualityBadge();
+  }
+  q.clean = 0; q.dirty = 0; q.all = 0; q.jerk = 0;
+  return score;
+}
+
+function pairSessionAvgQuality(slot){
+  const scores = pairQuality[slot].scores;
+  if(!scores.length) return null;
+  return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+}
+
+function updatePairQualityBadge(){
+  const avgA = pairSessionAvgQuality(0);
+  const avgB = pairSessionAvgQuality(1);
+  if(avgA == null && avgB == null){ pairQualityRow.style.display = 'none'; return; }
+  pairQualityRow.style.display = 'block';
+  const colorFor = (avg) => avg == null ? 'var(--ink-dim)' : avg >= 80 ? 'var(--ok)' : avg >= 55 ? 'var(--ink)' : 'var(--bad)';
+  pairQualityA.textContent = avgA != null ? avgA + '/100' : '—';
+  pairQualityA.style.color = colorFor(avgA);
+  pairQualityB.textContent = avgB != null ? avgB + '/100' : '—';
+  pairQualityB.style.color = colorFor(avgB);
 }
 
 // Le due persone rilevate in un fotogramma non hanno un id stabile da parte
@@ -5493,6 +5580,7 @@ function renderPairFrame(result, now){
 
     drawSkeleton(filteredLm, evalResult.ok, PAIR_STYLES[slot]);
     announcePairRealtimeIssue(slot, evalResult);
+    trackPairQualityFrame(slot, evalResult);
     if(ex.mode === 'timer' && evalResult.ok) pairTimerSeconds[slot] += dt;
   }
   setStatus(anyPerson, anyPerson ? 'Modalità coppia — inquadra entrambe le persone per intero' : 'Nessuna persona rilevata nell\'inquadratura');
