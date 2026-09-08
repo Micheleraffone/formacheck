@@ -768,6 +768,22 @@
         </div>
         <div id="caloriesTotalBadge" class="calib-status-note" style="display:none;"></div>
         <div id="acwrBadge" class="calib-status-note" style="display:none;" title="Rapporto tra il carico di allenamento dell'ultima settimana e la media delle ultime 4 settimane (Acute:Chronic Workload Ratio). Zona 0.8-1.3: aumento di carico prudente. Sopra 1.5: la letteratura sportiva associa un salto così rapido a un rischio di infortunio maggiore. Richiede di aver valutato lo sforzo (RPE) di almeno qualche sessione."></div>
+
+        <div id="wellnessSection" style="width:100%; max-width:300px; display:flex; flex-direction:column; gap:8px; align-items:center; padding-top:10px; margin-top:2px; border-top:1px solid var(--line);">
+          <div class="section-label">Benessere di oggi (Hooper Index) — 1 ottimo, 7 pessimo</div>
+          <div style="display:grid; grid-template-columns:1fr auto; gap:6px 10px; width:100%; font-size:12px; color:var(--ink-dim); align-items:center;">
+            <span>Affaticamento</span>
+            <input type="number" id="wellnessFatigue" min="1" max="7" value="4" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+            <span>Qualità del sonno (7 = ha dormito male)</span>
+            <input type="number" id="wellnessSleep" min="1" max="7" value="4" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+            <span>Dolori muscolari</span>
+            <input type="number" id="wellnessSoreness" min="1" max="7" value="4" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+            <span>Stress</span>
+            <input type="number" id="wellnessStress" min="1" max="7" value="4" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+          </div>
+          <button class="calib-skip" id="wellnessSaveBtn">Salva benessere di oggi</button>
+          <div class="calib-status-note" id="wellnessBadge" style="display:none;"></div>
+        </div>
       </div>
       <div id="historyChart" style="width:100%; max-width:340px;"></div>
       <div id="historyList" style="width:100%; max-width:340px; max-height:36vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
@@ -1138,6 +1154,12 @@ const goalProgressLabel = document.getElementById('goalProgressLabel');
 const bodyWeightInput = document.getElementById('bodyWeightInput');
 const caloriesTotalBadge = document.getElementById('caloriesTotalBadge');
 const acwrBadge = document.getElementById('acwrBadge');
+const wellnessFatigue = document.getElementById('wellnessFatigue');
+const wellnessSleep = document.getElementById('wellnessSleep');
+const wellnessSoreness = document.getElementById('wellnessSoreness');
+const wellnessStress = document.getElementById('wellnessStress');
+const wellnessSaveBtn = document.getElementById('wellnessSaveBtn');
+const wellnessBadge = document.getElementById('wellnessBadge');
 const historyChart = document.getElementById('historyChart');
 const historyList = document.getElementById('historyList');
 const historyExportBtn = document.getElementById('historyExportBtn');
@@ -3932,6 +3954,7 @@ function renderGoalPanel(){
     caloriesTotalBadge.style.display = 'none';
   }
   renderAcwrBadge();
+  renderWellnessSection();
 }
 
 // --- Acute:Chronic Workload Ratio (ACWR) ---
@@ -3973,6 +3996,102 @@ function renderAcwrBadge(){
   acwrBadge.style.color = zone.color;
   acwrBadge.textContent = '⚖️ Carico settimanale: ' + Math.round(acwr.acute) + ' AU (rapporto ' + acwr.ratio.toFixed(2) + ' vs media 4 settimane) — ' + zone.label;
 }
+
+// --- Wellness Score (Hooper Index) ---
+// Questionario giornaliero brevissimo (Hooper & Mackinnon, 1995), usato come
+// "readiness check" quotidiano in moltissime squadre professionistiche:
+// quattro valutazioni 1-7 (affaticamento, sonno, dolori muscolari, stress —
+// più alto = peggiore in ciascuna), sommate in un punteggio 4-28 dove più
+// basso è meglio. Incrociato col carico di allenamento (vedi ACWR), è il
+// segnale più diretto per capire se serve un giorno di scarico. Salvato
+// separatamente dallo storico allenamenti (una voce al giorno, non per
+// sessione): il benessere si valuta una volta al giorno, non a ogni
+// allenamento.
+const WELLNESS_STORAGE_KEY = 'formacheck_wellness_v1';
+
+function loadWellness(){
+  try{ return JSON.parse(localStorage.getItem(WELLNESS_STORAGE_KEY) || '{}'); } catch(e){ return {}; }
+}
+function saveWellnessAll(all){
+  try{ localStorage.setItem(WELLNESS_STORAGE_KEY, JSON.stringify(all)); } catch(e){ /* storage non disponibile */ }
+}
+function todayKey(){
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function hooperIndex(entry){
+  if(!entry) return null;
+  const vals = [entry.fatigue, entry.sleep, entry.soreness, entry.stress];
+  if(vals.some(v => v == null || isNaN(v))) return null;
+  return vals.reduce((a, b) => a + b, 0);
+}
+
+// Confronta il punteggio di oggi con la media dei giorni precedenti
+// registrati: serve almeno qualche giorno di storico per un confronto
+// sensato, altrimenti mostra solo il punteggio grezzo.
+function wellnessTrend(){
+  const all = loadWellness();
+  const today = todayKey();
+  const todayScore = hooperIndex(all[today]);
+  if(todayScore == null) return null;
+  const priorScores = Object.keys(all)
+    .filter(k => k !== today)
+    .map(k => hooperIndex(all[k]))
+    .filter(v => v != null);
+  if(priorScores.length < 3) return { todayScore, avg: null, note: null };
+  const avg = priorScores.reduce((a, b) => a + b, 0) / priorScores.length;
+  const diff = todayScore - avg;
+  let note;
+  if(diff >= 4) note = 'nettamente peggiore della tua media recente — valuta un giorno di scarico';
+  else if(diff <= -4) note = 'migliore della tua media recente';
+  else note = 'in linea con la tua media recente';
+  return { todayScore, avg, note };
+}
+
+function clampWellnessInput(input){
+  // NON usare "|| 4": 0 è un input non valido da riportare a 1 (fuori range),
+  // non un valore "falsy" da confondere con un parseInt fallito (NaN) — con
+  // "||" i due casi si sovrapporrebbero e uno 0 diventerebbe erroneamente 4.
+  const parsed = parseInt(input.value, 10);
+  const val = Math.max(1, Math.min(7, isNaN(parsed) ? 4 : parsed));
+  input.value = val;
+  return val;
+}
+
+function renderWellnessSection(){
+  const entry = loadWellness()[todayKey()];
+  wellnessFatigue.value = entry ? entry.fatigue : 4;
+  wellnessSleep.value = entry ? entry.sleep : 4;
+  wellnessSoreness.value = entry ? entry.soreness : 4;
+  wellnessStress.value = entry ? entry.stress : 4;
+  updateWellnessBadge();
+}
+
+function updateWellnessBadge(){
+  const trend = wellnessTrend();
+  if(!trend){ wellnessBadge.style.display = 'none'; return; }
+  wellnessBadge.style.display = 'block';
+  wellnessBadge.textContent = '🩺 Hooper Index di oggi: ' + trend.todayScore + '/28'
+    + (trend.note ? ' — ' + trend.note : ' (servono più giorni registrati per un confronto)');
+  wellnessBadge.style.color = trend.note && trend.note.startsWith('nettamente peggiore') ? 'var(--bad)'
+    : (trend.note && trend.note.startsWith('migliore') ? 'var(--ok)' : 'var(--ink-dim)');
+}
+
+wellnessSaveBtn.addEventListener('click', () => {
+  const entry = {
+    fatigue: clampWellnessInput(wellnessFatigue),
+    sleep: clampWellnessInput(wellnessSleep),
+    soreness: clampWellnessInput(wellnessSoreness),
+    stress: clampWellnessInput(wellnessStress),
+    ts: Date.now()
+  };
+  const all = loadWellness();
+  all[todayKey()] = entry;
+  saveWellnessAll(all);
+  updateWellnessBadge();
+  pushFeedback('🩺 Benessere di oggi registrato.', true);
+});
 
 goalWeeklyInput.addEventListener('change', () => {
   const val = Math.max(1, Math.min(14, parseInt(goalWeeklyInput.value, 10) || 3));
