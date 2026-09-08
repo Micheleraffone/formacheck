@@ -754,6 +754,7 @@
     <div class="calib-overlay" id="historyOverlay" style="display:none;">
       <div class="calib-title">Cronologia allenamenti</div>
       <div id="goalPanel" style="width:100%; max-width:340px; display:flex; flex-direction:column; gap:8px; align-items:center;">
+        <div id="deloadBadge" class="calib-status-note" style="display:none; width:100%; box-sizing:border-box;" title="Combina tre segnali già misurati altrove nell'app — carico di allenamento (ACWR), benessere percepito (Hooper Index) e andamento della velocità di esecuzione (VBT) nelle ultime sessioni — invece di un singolo numero, perché ciascun segnale preso da solo può dare falsi allarmi. Regole trasparenti, non un modello addestrato: più segnali in stato di allerta insieme, più la raccomandazione di scarico è forte."></div>
         <div id="streakBadge" style="font-family:'Manrope', sans-serif; font-weight:700; font-size:15px;">🔥 0 giorni di fila</div>
         <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-dim);">
           <span>Obiettivo: allenamenti a settimana</span>
@@ -1147,6 +1148,7 @@ const exportBackupBtn = document.getElementById('exportBackupBtn');
 const importBackupBtn = document.getElementById('importBackupBtn');
 const importBackupInput = document.getElementById('importBackupInput');
 const backupStatusNote = document.getElementById('backupStatusNote');
+const deloadBadge = document.getElementById('deloadBadge');
 const streakBadge = document.getElementById('streakBadge');
 const goalWeeklyInput = document.getElementById('goalWeeklyInput');
 const goalProgressBar = document.getElementById('goalProgressBar');
@@ -3955,6 +3957,7 @@ function renderGoalPanel(){
   }
   renderAcwrBadge();
   renderWellnessSection();
+  renderDeloadBadge();
 }
 
 // --- Acute:Chronic Workload Ratio (ACWR) ---
@@ -4090,8 +4093,88 @@ wellnessSaveBtn.addEventListener('click', () => {
   all[todayKey()] = entry;
   saveWellnessAll(all);
   updateWellnessBadge();
+  renderDeloadBadge(); // il benessere appena salvato può cambiare la raccomandazione di scarico
   pushFeedback('🩺 Benessere di oggi registrato.', true);
 });
+
+// --- raccomandazione di scarico autoregolata ---
+// Non è un singolo protocollo con un nome specifico in letteratura, ma la
+// pratica reale dei reparti di "load management" dello sport
+// professionistico: combinare più segnali indipendenti — invece di uno
+// solo — perché ciascuno preso da solo può dare falsi allarmi (un ACWR alto
+// dopo una singola sessione intensa non è la stessa cosa di un ACWR alto
+// insieme a un benessere in calo E una velocità di esecuzione in calo).
+// Riusa tre segnali già calcolati altrove nell'app (ACWR, Hooper Index,
+// andamento VBT recente): nessun dato nuovo, nessun modello addestrato,
+// solo regole trasparenti su quanti segnali sono contemporaneamente in
+// stato di allerta.
+const DELOAD_VELOCITY_DROP_PCT = -15; // calo percentuale di velocità tra le sessioni recenti e quelle precedenti, oltre il quale è un segnale
+
+// Confronta la velocità media (VBT) delle ultime sessioni con quella delle
+// sessioni precedenti: un calo persistente su più allenamenti, non solo
+// dentro una singola sessione (già coperto da VBT_DROP_RATIO), è un segnale
+// di affaticamento che si accumula nel tempo. Richiede abbastanza sessioni
+// con un dato di velocità per un confronto sensato.
+function computeRecentVelocityTrend(){
+  const hist = loadHistory()
+    .filter(e => e.avgVelocityMps != null)
+    .sort((a, b) => a.ts - b.ts);
+  if(hist.length < 4) return null;
+  const recent = hist.slice(-2);
+  const earlier = hist.slice(0, -2).slice(-4);
+  if(earlier.length < 2) return null;
+  const recentAvg = recent.reduce((s, e) => s + e.avgVelocityMps, 0) / recent.length;
+  const earlierAvg = earlier.reduce((s, e) => s + e.avgVelocityMps, 0) / earlier.length;
+  if(earlierAvg <= 0) return null;
+  return Math.round(((recentAvg - earlierAvg) / earlierAvg) * 100);
+}
+
+function computeDeloadRecommendation(){
+  const flags = [];
+  let anySignal = false;
+
+  const acwr = computeACWR();
+  if(acwr){
+    anySignal = true;
+    if(acwr.ratio > 1.5) flags.push('carico in aumento rapido (ACWR ' + acwr.ratio.toFixed(2) + ')');
+  }
+
+  const wellness = wellnessTrend();
+  if(wellness && wellness.note != null){
+    anySignal = true;
+    if(wellness.note.startsWith('nettamente peggiore')) flags.push('benessere percepito in calo (Hooper Index ' + wellness.todayScore + '/28)');
+  }
+
+  const velocityTrendPct = computeRecentVelocityTrend();
+  if(velocityTrendPct != null){
+    anySignal = true;
+    if(velocityTrendPct <= DELOAD_VELOCITY_DROP_PCT) flags.push('velocità di esecuzione in calo nelle ultime sessioni (' + velocityTrendPct + '%)');
+  }
+
+  if(!anySignal) return null; // nessun segnale disponibile: meglio tacere che dare un falso "tutto ok"
+
+  let level, label;
+  if(flags.length >= 2){
+    level = 'high';
+    label = '🛑 Scarico consigliato questa settimana: ' + flags.join('; ') + '.';
+  } else if(flags.length === 1){
+    level = 'mid';
+    label = '⚠️ Monitora l\'affaticamento: ' + flags[0] + '.';
+  } else {
+    level = 'ok';
+    label = '✅ Carico sostenibile: nessun segnale di affaticamento accumulato.';
+  }
+  return { flags, level, label };
+}
+
+function renderDeloadBadge(){
+  const rec = computeDeloadRecommendation();
+  if(!rec){ deloadBadge.style.display = 'none'; return; }
+  deloadBadge.style.display = 'block';
+  deloadBadge.textContent = rec.label;
+  deloadBadge.style.color = rec.level === 'high' ? 'var(--bad)' : rec.level === 'mid' ? 'var(--warn)' : 'var(--ok)';
+  deloadBadge.style.fontWeight = rec.level === 'high' ? '700' : '400';
+}
 
 goalWeeklyInput.addEventListener('change', () => {
   const val = Math.max(1, Math.min(14, parseInt(goalWeeklyInput.value, 10) || 3));
