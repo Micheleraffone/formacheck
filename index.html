@@ -943,8 +943,12 @@
       Qualità movimento (euristica): <span id="qualityBadgeValue" style="font-weight:700; color:var(--ink);">—</span>
     </div>
 
-    <div id="vbtBadgeRow" style="display:none; text-align:center; padding-bottom:6px; font-size:11.5px; color:var(--ink-dim);" title="Velocità del bacino nello spazio 3D durante la ripetizione (picco, in m/s): ispirata al Velocity-Based Training usato nello sport professionistico, dove però si misura la velocità di un carico esterno con un sensore dedicato. Qui misuriamo la velocità del corpo stesso dai dati del modello di posa.">
+    <div id="vbtBadgeRow" style="display:none; text-align:center; padding-bottom:6px; font-size:11.5px; color:var(--ink-dim);" title="Velocità del bacino nello spazio 3D durante la ripetizione (picco, in m/s): ispirata al Velocity-Based Training usato nello sport professionistico, dove però si misura la velocità di un carico esterno con un sensore dedicato. Qui misuriamo la velocità del corpo stesso dai dati del modello di posa. Il RIR (ripetizioni in riserva) stimato è una tabella semplificata basata sul calo di velocità, non una misura clinica.">
       Velocità esecuzione (picco): <span id="vbtBadgeValue" style="font-weight:700; color:var(--ink);">—</span>
+    </div>
+
+    <div id="tempoBadgeRow" style="display:none; text-align:center; padding-bottom:6px; font-size:11.5px; color:var(--ink-dim);" title="Tempo reale di discesa e risalita dell'ultima ripetizione, stimato dal punto di inversione della metrica angolare principale. Un tempo di discesa molto breve indica un movimento di slancio, non controllato.">
+      Tempo: <span id="tempoBadgeValue" style="font-weight:700; color:var(--ink);">—</span>
     </div>
 
     <div id="pairCountersRow" style="display:none; gap:10px; padding:6px 0 2px;">
@@ -971,6 +975,8 @@
       <input type="number" id="setsGoalInput" min="1" value="1" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
     </div>
     <div class="calib-status-note" id="setBadge" style="display:none; text-align:center;"></div>
+    <button class="btn" id="apreBtn" style="width:100%; display:none;">🎯 Autoregolazione APRE disattivata — tocca per attivare</button>
+    <div class="calib-status-note" id="apreHint" style="display:none; margin-top:8px; margin-bottom:8px;">Tra una serie e l'altra, alza o abbassa in automatico il traguardo di ripetizioni della serie successiva in base a come è andata quella appena conclusa (qualità della forma e velocità di esecuzione) — un'autoregolazione ispirata al protocollo APRE usato nello strength &amp; conditioning. Richiede almeno 2 serie.</div>
     <div id="singleRestPresetWrap" style="display:none;">
       <div class="section-label">Riposo tra le serie</div>
       <div class="cam-select" id="singleRestPresetSelect">
@@ -1033,6 +1039,8 @@ const qualityBadgeRow = document.getElementById('qualityBadgeRow');
 const qualityBadgeValue = document.getElementById('qualityBadgeValue');
 const vbtBadgeRow = document.getElementById('vbtBadgeRow');
 const vbtBadgeValue = document.getElementById('vbtBadgeValue');
+const tempoBadgeRow = document.getElementById('tempoBadgeRow');
+const tempoBadgeValue = document.getElementById('tempoBadgeValue');
 const calibOverlay = document.getElementById('calibOverlay');
 const calibChecklist = document.getElementById('calibChecklist');
 const calibBar = document.getElementById('calibBar');
@@ -1121,6 +1129,8 @@ const repGoalInput = document.getElementById('repGoalInput');
 const repGoalUnit = document.getElementById('repGoalUnit');
 const setsGoalInput = document.getElementById('setsGoalInput');
 const setBadge = document.getElementById('setBadge');
+const apreBtn = document.getElementById('apreBtn');
+const apreHint = document.getElementById('apreHint');
 const singleRestPresetWrap = document.getElementById('singleRestPresetWrap');
 
 // Piccole icone SVG in stile lineare (coerenti con l'estetica tecnica
@@ -1418,11 +1428,32 @@ let vbtBaseline = null; // media di picco delle prime VBT_BASELINE_REPS ripetizi
 let vbtDropStreak = 0;
 let vbtWarned = false;
 
+// Tempo training (fase di discesa/risalita): vedi trackTempoFrame più sotto.
+let tempoSamples = []; // {t, v} della metrica angolare primaria durante la ripetizione in corso
+let tempoLastPhaseStart = null;
+let tempoLastSplit = null; // {eccentricMs, concentricMs} dell'ultima ripetizione completata
+
+// APRE (Autoregulatory Progressive Resistance Exercise): vedi apreAdjustGoal
+// più sotto. Disattivato di default.
+const APRE_STORAGE_KEY = 'formacheck_apre_v1';
+let apreEnabled = false;
+try{ apreEnabled = localStorage.getItem(APRE_STORAGE_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
+let apreGoalOverride = null; // traguardo della serie corrente, quando l'autoregolazione lo ha modificato
+let apreSetQualityStart = 0; // indice in qualityRepScores da cui inizia la serie corrente
+let apreSetVbtStart = 0; // indice in vbtRepPeaks da cui inizia la serie corrente
+
 const VIEW_META = {
   laterale: { icon:'◐', title:'Vista laterale' },
   frontale: { icon:'◯', title:'Vista frontale' },
   posteriore: { icon:'◑', title:'Vista posteriore' }
 };
+
+// Traguardo ripetizioni effettivo della serie corrente: quello configurato,
+// a meno che l'autoregolazione APRE (se attiva) lo abbia sovrascritto per
+// questa serie — vedi apreAdjustGoal.
+function effectiveRepGoal(){
+  return (apreEnabled && apreGoalOverride != null) ? apreGoalOverride : repGoal;
+}
 
 function incrementRep(){
   repCount++;
@@ -1431,12 +1462,60 @@ function incrementRep(){
   void repNum.offsetWidth; // forza il reflow: riavvia l'animazione anche su incrementi consecutivi
   repNum.classList.add('pulse');
   if(voiceEnabled) speak(String(repCount));
-  if(!circuitActive && EXERCISES[currentExercise].mode === 'reps' && (repCount - setBaseline) === repGoal && !exState.goalCelebrated){
+  if(!circuitActive && EXERCISES[currentExercise].mode === 'reps' && (repCount - setBaseline) === effectiveRepGoal() && !exState.goalCelebrated){
     exState.goalCelebrated = true;
-    handleGoalReached(repGoal + ' ripetizioni');
+    handleGoalReached(effectiveRepGoal() + ' ripetizioni');
   }
   if(circuitActive && !isResting && repCount >= circuitList[circuitIndex].target){
     triggerCircuitAdvance();
+  }
+}
+
+// --- APRE: Autoregulatory Progressive Resistance Exercise ---
+// Protocollo reale di autoregolazione della forza (Mann et al.): il
+// traguardo della serie successiva si adatta a come è andata quella appena
+// conclusa, invece di restare fisso per tutta la sessione. In palestra si
+// autoregola il CARICO in base alle ripetizioni ottenute con un peso fisso;
+// qui, senza un carico esterno, si autoregola il TRAGUARDO (ripetizioni)
+// usando due segnali che già misuriamo durante la serie appena conclusa:
+// la qualità media della forma e un eventuale calo di velocità (VBT).
+// Regole trasparenti, non un modello addestrato:
+//  - forma pulita (qualità media >= 75) e nessun calo di velocità rilevante
+//    → serie andata bene "a fresco": alza il traguardo della prossima serie
+//  - forma scorretta (qualità media < 55) o calo di velocità marcato
+//    → serie faticosa: abbassa leggermente il traguardo (mai sotto 3)
+//  - via di mezzo → lascia invariato
+// Solo per esercizi a ripetizioni: un esercizio a timer non ha "ripetizioni"
+// da alzare o abbassare in questo modo.
+function apreAdjustGoal(){
+  const ex = EXERCISES[currentExercise];
+  const setQuality = qualityRepScores.slice(apreSetQualityStart);
+  const setVelocities = vbtRepPeaks.slice(apreSetVbtStart);
+  apreSetQualityStart = qualityRepScores.length;
+  apreSetVbtStart = vbtRepPeaks.length;
+  if(ex.mode !== 'reps' || setQuality.length === 0) return; // nessun dato utile dalla serie appena conclusa
+
+  const avgQ = setQuality.reduce((a, b) => a + b, 0) / setQuality.length;
+  let velocityDropped = false;
+  if(setVelocities.length >= 2){
+    const first = setVelocities[0], last = setVelocities[setVelocities.length - 1];
+    if(first > 0 && last / first < VBT_DROP_RATIO) velocityDropped = true;
+  }
+
+  const currentGoal = effectiveRepGoal();
+  let nextGoal = currentGoal;
+  let reason = null;
+  if(avgQ >= 75 && !velocityDropped){
+    nextGoal = currentGoal + Math.max(1, Math.round(currentGoal * 0.15));
+    reason = 'ottima forma e velocità stabile';
+  } else if(avgQ < 55 || velocityDropped){
+    nextGoal = Math.max(3, currentGoal - Math.max(1, Math.round(currentGoal * 0.15)));
+    reason = velocityDropped ? 'calo di velocità rilevato' : 'forma poco pulita in questa serie';
+  }
+
+  if(nextGoal !== currentGoal){
+    apreGoalOverride = nextGoal;
+    pushFeedback('🎯 Autoregolazione APRE: prossima serie a ' + nextGoal + ' ripetizioni (' + reason + ').', true);
   }
 }
 
@@ -1453,6 +1532,7 @@ function handleGoalReached(achievedLabel){
     return;
   }
   pushFeedback('🎯 Serie ' + currentSet + ' di ' + setsGoal + ' completata: ' + achievedLabel + '.', true);
+  if(apreEnabled) apreAdjustGoal();
   const ex = EXERCISES[currentExercise];
   setBaseline = ex.mode === 'reps' ? repCount : timerSeconds;
   currentSet++;
@@ -1495,6 +1575,7 @@ function completeRep(hadIssue, invalidMsg, validMsg){
   const repDurationMs = exState.phaseStart != null ? performance.now() - exState.phaseStart : null;
   recordQualitySample(); // chiude il punteggio qualità di questa ripetizione (valida o scartata)
   recordVbtRep(); // idem per la velocità di picco di questa ripetizione
+  recordTempoRep(); // idem per la suddivisione discesa/risalita
   if(hadIssue){
     invalidRepCount++;
     const parts = Array.isArray(invalidMsg) ? invalidMsg : [invalidMsg || 'Ripetizione non conteggiata: correggi la forma e riprova.'];
@@ -1721,12 +1802,118 @@ function vbtVelocityTrendPct(){
   return Math.round(((last - first) / first) * 100);
 }
 
+// --- reps in riserva (RIR) stimate dal calo di velocità ---
+// Tabella semplificata ispirata alle soglie di "velocity loss" usate nello
+// strength & conditioning per l'autoregolazione (es. Gonzalez-Badillo et
+// al.): più la velocità di picco cala rispetto al riferimento "a fresco",
+// meno ripetizioni restano prima del cedimento. Qui il "carico" è il corpo
+// stesso, non un bilanciere misurato da un trasduttore dedicato: è una
+// stima approssimativa per un contesto a corpo libero, dichiarata come tale
+// in interfaccia — non una misura clinica.
+function estimateRIR(peakVelocity){
+  if(vbtBaseline == null || vbtBaseline <= 0) return null;
+  const ratio = peakVelocity / vbtBaseline;
+  if(ratio >= 0.90) return '4+';
+  if(ratio >= 0.80) return '2-3';
+  if(ratio >= 0.70) return '1-2';
+  return '0-1';
+}
+
 function updateVbtBadge(){
   if(!vbtRepPeaks.length){ vbtBadgeRow.style.display = 'none'; return; }
   vbtBadgeRow.style.display = 'block';
   const last = vbtRepPeaks[vbtRepPeaks.length - 1];
-  vbtBadgeValue.textContent = last.toFixed(2) + ' m/s';
+  let text = last.toFixed(2) + ' m/s';
+  // La stima RIR richiede un riferimento "a fresco" già stabilito, quindi
+  // compare solo dopo le prime VBT_BASELINE_REPS ripetizioni.
+  const rir = estimateRIR(last);
+  if(rir != null) text += ' — RIR stimato ' + rir;
+  vbtBadgeValue.textContent = text;
   vbtBadgeValue.style.color = (vbtBaseline != null && last < vbtBaseline * VBT_DROP_RATIO) ? 'var(--bad)' : 'var(--ink)';
+}
+
+// --- tempo training (fase di discesa/risalita) ---
+// I coach di forza prescrivono spesso un tempo controllato per ciascuna fase
+// della ripetizione (es. "3 secondi di discesa, 1 di risalita"): scendere
+// troppo velocemente vuol dire usare lo slancio invece del controllo
+// muscolare, un errore di forma che le sole soglie angolari non colgono.
+// Qui non c'è un programma con un tempo prescritto specifico (servirebbe
+// una struttura che l'app non ha), ma misuriamo comunque la durata reale
+// delle due fasi usando solo la metrica angolare primaria già disponibile
+// per ogni esercizio — senza bisogno di sapere come ciascuno dei 16
+// esercizi chiama le proprie fasi interne (i nomi variano: 'up'/'down',
+// 'in'/'out', 'open'/'closed'...). Il punto di inversione tra le due fasi è
+// semplicemente l'estremo (minimo o massimo, a seconda del verso del
+// movimento) della metrica osservata durante la ripetizione.
+const TEMPO_FAST_ECCENTRIC_MS = 400; // sotto questa soglia la discesa è considerata "di slancio", non controllata
+
+function trackTempoFrame(evalResult){
+  if(EXERCISES[currentExercise].mode !== 'reps') return;
+  if(exState.phaseStart == null){ tempoSamples = []; tempoLastPhaseStart = null; return; }
+  if(exState.phaseStart !== tempoLastPhaseStart){
+    tempoLastPhaseStart = exState.phaseStart;
+    tempoSamples = [];
+  }
+  const primary = evalResult.metrics && evalResult.metrics[0];
+  const isAngle = primary && typeof primary.value === 'string' && primary.value.endsWith('°');
+  if(isAngle){
+    const numeric = parseFloat(primary.value);
+    if(!isNaN(numeric)) tempoSamples.push({ t: performance.now(), v: numeric });
+  }
+}
+
+// Analizza il campione della ripetizione appena conclusa per trovare il
+// punto di inversione e dividere la durata totale in due fasi. Funziona
+// indipendentemente dal verso della metrica (che scenda e poi risalga, o
+// viceversa) confrontando il valore di partenza con quello di arrivo.
+function analyzeTempoSplit(){
+  if(tempoSamples.length < 3) return null;
+  const first = tempoSamples[0].v;
+  const last = tempoSamples[tempoSamples.length - 1].v;
+  let turnIdx = 0;
+  if(last >= first){
+    let extreme = Infinity;
+    tempoSamples.forEach((s, i) => { if(s.v < extreme){ extreme = s.v; turnIdx = i; } });
+  } else {
+    let extreme = -Infinity;
+    tempoSamples.forEach((s, i) => { if(s.v > extreme){ extreme = s.v; turnIdx = i; } });
+  }
+  // Nessuna vera inversione trovata (l'estremo è a un capo del campione):
+  // il movimento di questo esercizio non ha la forma "scende poi risale"
+  // che questa analisi presuppone, meglio non riportare un dato fuorviante.
+  if(turnIdx === 0 || turnIdx === tempoSamples.length - 1) return null;
+  const startT = tempoSamples[0].t;
+  const turnT = tempoSamples[turnIdx].t;
+  const endT = tempoSamples[tempoSamples.length - 1].t;
+  return { eccentricMs: turnT - startT, concentricMs: endT - turnT };
+}
+
+function recordTempoRep(){
+  const split = analyzeTempoSplit();
+  tempoLastSplit = split;
+  tempoSamples = [];
+  tempoLastPhaseStart = null;
+  if(split && split.eccentricMs < TEMPO_FAST_ECCENTRIC_MS){
+    pushFeedback('Fase di discesa molto rapida: prova a controllarla di più invece di lasciarti andare.', false);
+  }
+  updateTempoBadge();
+  return split;
+}
+
+function resetTempoTracking(){
+  tempoSamples = [];
+  tempoLastPhaseStart = null;
+  tempoLastSplit = null;
+  updateTempoBadge();
+}
+
+function updateTempoBadge(){
+  if(!tempoLastSplit){ tempoBadgeRow.style.display = 'none'; return; }
+  tempoBadgeRow.style.display = 'block';
+  const eccS = (tempoLastSplit.eccentricMs / 1000).toFixed(1);
+  const conS = (tempoLastSplit.concentricMs / 1000).toFixed(1);
+  tempoBadgeValue.textContent = eccS + 's discesa / ' + conS + 's risalita';
+  tempoBadgeValue.style.color = tempoLastSplit.eccentricMs < TEMPO_FAST_ECCENTRIC_MS ? 'var(--bad)' : 'var(--ink)';
 }
 
 // Il motivo di scarto più frequente nella sessione corrente (per il riepilogo).
@@ -2271,6 +2458,44 @@ voiceCommandBtn.addEventListener('click', () => {
   syncRecognition();
 });
 
+// --- Limb Symmetry Index (semplificato), per l'affondo ---
+// Ispirato al Limb Symmetry Index usato nella riabilitazione sportiva (es.
+// rientro da un infortunio al ginocchio), dove si confronta la prestazione
+// tra arto sano e arto operato: qui confrontiamo la profondità media
+// raggiunta (angolo minimo del ginocchio anteriore durante la ripetizione,
+// più basso = più profondo) tra gamba sinistra e destra nella sessione
+// corrente. Conta solo le ripetizioni valide, per non lasciare che forma
+// scorretta su un lato falsi il confronto. È una versione semplificata per
+// un contesto di allenamento a corpo libero, non una misura clinica.
+const LUNGE_LSI_MIN_REPS_PER_SIDE = 3;
+const LUNGE_LSI_RATIO_THRESHOLD = 0.85; // sotto questo rapporto, l'asimmetria è considerata significativa
+function trackLungeSymmetry(isLeft, minKnee){
+  if(exState.lsiLeftSum === undefined){
+    exState.lsiLeftSum = 0; exState.lsiLeftCount = 0;
+    exState.lsiRightSum = 0; exState.lsiRightCount = 0;
+    exState.lsiWarned = false;
+  }
+  if(isLeft){ exState.lsiLeftSum += minKnee; exState.lsiLeftCount++; }
+  else { exState.lsiRightSum += minKnee; exState.lsiRightCount++; }
+
+  if(exState.lsiWarned) return;
+  if(exState.lsiLeftCount < LUNGE_LSI_MIN_REPS_PER_SIDE || exState.lsiRightCount < LUNGE_LSI_MIN_REPS_PER_SIDE) return;
+  const leftAvgAngle = exState.lsiLeftSum / exState.lsiLeftCount;
+  const rightAvgAngle = exState.lsiRightSum / exState.lsiRightCount;
+  // Angolo minore = più profondo = migliore: converte in un "punteggio di
+  // profondità" (più alto = meglio) prima di confrontare i due lati, così
+  // stronger/weaker si leggono nel verso intuitivo.
+  const leftDepth = 180 - leftAvgAngle;
+  const rightDepth = 180 - rightAvgAngle;
+  const stronger = Math.max(leftDepth, rightDepth);
+  const weaker = Math.min(leftDepth, rightDepth);
+  if(stronger > 0 && weaker / stronger < LUNGE_LSI_RATIO_THRESHOLD){
+    exState.lsiWarned = true;
+    const weakerSide = leftDepth < rightDepth ? 'sinistra' : 'destra';
+    pushFeedback('Affondo meno profondo sulla gamba ' + weakerSide + ': possibile squilibrio tra i due lati.', false);
+  }
+}
+
 // --- registro esercizi ---
 const EXERCISES = {
   squat: {
@@ -2424,13 +2649,18 @@ const EXERCISES = {
         exState.repHadIssue = false;
         exState.issueSince = null;
         exState.phaseStart = performance.now();
+        exState.repWorkingLeft = workingLeft; // lato di questa ripetizione, per il Limb Symmetry Index
+        exState.repMinKnee = workingKnee; // minimo raggiunto durante la ripetizione (profondità)
       } else if(exState.phase === 'down'){
         trackFormIssue(issues.length > 0, issues[0]);
+        if(workingKnee < exState.repMinKnee) exState.repMinKnee = workingKnee;
         if(workingKnee > t.kneeUpExit){
           exState.phase = 'up';
           const tooFast = repTooFast(exState.phaseStart);
           const invalidParts = tooFast ? 'Movimento troppo rapido o instabile: ripetizione non conteggiata.' : rejectRepSequence(exState.lastIssueMsg);
-          completeRep(exState.repHadIssue || tooFast, invalidParts, 'Affondo profondo, forma corretta.');
+          const hadIssue = exState.repHadIssue || tooFast;
+          completeRep(hadIssue, invalidParts, 'Affondo profondo, forma corretta.');
+          if(!hadIssue) trackLungeSymmetry(exState.repWorkingLeft, exState.repMinKnee);
           exState.repHadIssue = false;
           exState.issueSince = null;
         }
@@ -4374,7 +4604,7 @@ function selectExercise(key){
 // modalità singolo esercizio; in modalità circuito il traguardo è già gestito
 // per esercizio dal circuito stesso, quindi qui resta nascosto.
 function updateGoalUI(){
-  if(appMode !== 'single'){ repGoalRow.style.display = 'none'; setBadge.style.display = 'none'; singleRestPresetWrap.style.display = 'none'; return; }
+  if(appMode !== 'single'){ repGoalRow.style.display = 'none'; setBadge.style.display = 'none'; singleRestPresetWrap.style.display = 'none'; apreBtn.style.display = 'none'; apreHint.style.display = 'none'; return; }
   const ex = EXERCISES[currentExercise];
   repGoalRow.style.display = 'flex';
   if(ex.mode === 'reps'){
@@ -4387,7 +4617,28 @@ function updateGoalUI(){
   setsGoalInput.value = setsGoal;
   singleRestPresetWrap.style.display = setsGoal > 1 ? 'block' : 'none';
   updateSetBadge();
+  updateApreBtn();
 }
+
+// L'autoregolazione APRE ha senso solo con più serie dello stesso esercizio
+// a ripetizioni: nascosta altrimenti (esercizi a timer, o una singola serie).
+function updateApreBtn(){
+  const ex = EXERCISES[currentExercise];
+  const show = appMode === 'single' && ex.mode === 'reps' && setsGoal > 1;
+  apreBtn.style.display = show ? 'block' : 'none';
+  apreHint.style.display = (show && apreEnabled) ? 'block' : 'none';
+  apreBtn.textContent = apreEnabled
+    ? '🎯 Autoregolazione APRE attiva — tocca per disattivare'
+    : '🎯 Autoregolazione APRE disattivata — tocca per attivare';
+  apreBtn.classList.toggle('primary', apreEnabled);
+}
+
+apreBtn.addEventListener('click', () => {
+  apreEnabled = !apreEnabled;
+  try{ localStorage.setItem(APRE_STORAGE_KEY, apreEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
+  if(!apreEnabled) apreGoalOverride = null; // torna subito al traguardo configurato manualmente
+  updateApreBtn();
+});
 
 repGoalInput.addEventListener('change', () => {
   const val = Math.max(1, parseInt(repGoalInput.value, 10) || 1);
@@ -4404,6 +4655,7 @@ setsGoalInput.addEventListener('change', () => {
   if(currentSet > setsGoal) currentSet = setsGoal;
   singleRestPresetWrap.style.display = setsGoal > 1 ? 'block' : 'none';
   updateSetBadge();
+  updateApreBtn();
 });
 
 // Mostra "Serie X di Y" durante il tracciamento attivo, solo quando sono
@@ -4473,6 +4725,10 @@ function resetMetrics(){
   resetRealtimeIssueTracking();
   resetQualityTracking();
   resetVbtTracking();
+  resetTempoTracking();
+  apreGoalOverride = null;
+  apreSetQualityStart = 0;
+  apreSetVbtStart = 0;
   activeElapsedMs = 0;
   lastActiveTick = performance.now();
   feedbackList.innerHTML = '';
@@ -5587,6 +5843,7 @@ function renderLoop(){
       });
       trackQualityFrame(evalResult);
       trackVbtFrame();
+      trackTempoFrame(evalResult);
 
       if(ex.mode === 'timer' && evalResult.ok){
         const tickNow = performance.now();
