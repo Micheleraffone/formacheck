@@ -1473,6 +1473,13 @@ let pairLastTick = performance.now();
 let pairRealtimeIssueSince = [null, null];
 let pairRealtimeIssueAnnounced = [false, false];
 let pairLastHoldOkAnnounce = [0, 0];
+// Da quando l'inquadratura di questo slot non è più valida (persona parzialmente
+// fuori campo, troppo vicina/lontana): stesso principio di framingBadSince
+// della modalità singola, con la stessa soglia di tolleranza (FRAMING_GRACE_MS,
+// definita più sotto insieme alla logica di modalità singola) — un urto o uno
+// spostamento momentaneo della fotocamera non deve far scattare ripetizioni
+// false o errori fasulli.
+let pairFramingBadSince = [null, null];
 // Punteggio qualità del movimento (vedi trackQualityFrame più sotto), un
 // tracker indipendente per slot: le due persone possono avere una forma
 // diversa nello stesso istante, quindi non possono condividere lo stato
@@ -6288,6 +6295,7 @@ function resetPairCounters(){
   pairRealtimeIssueSince = [null, null];
   pairRealtimeIssueAnnounced = [false, false];
   pairLastHoldOkAnnounce = [0, 0];
+  pairFramingBadSince = [null, null];
   pairQuality = [makeQualityTracker(), makeQualityTracker()];
   updatePairQualityBadge();
   updatePairCountersUI();
@@ -6521,6 +6529,28 @@ function renderPairFrame(result, now){
     const filteredLm = filterLandmarks(pairFilterState[slot].lm, rawLm, now);
     const filteredWlm = rawWlm ? filterLandmarks(pairFilterState[slot].wlm, rawWlm, now) : null;
 
+    // Come la modalità singola: se l'inquadratura di questa persona non è
+    // valida (fuori campo, troppo vicina/lontana), gli angoli calcolati
+    // diventano inaffidabili e possono generare ripetizioni false o errori
+    // fasulli anche restando fermi — è esattamente quello che succede se la
+    // fotocamera viene urtata o spostata durante l'allenamento in coppia.
+    // Con la stessa tolleranza già usata in modalità singola (FRAMING_GRACE_MS):
+    // un urto momentaneo viene ignorato, non valutato come un vero errore.
+    const framingCheck = checkCalibration(filteredLm);
+    if(!framingCheck.allPass){
+      drawSkeleton(filteredLm, false, PAIR_STYLES[slot]);
+      if(pairFramingBadSince[slot] == null){
+        pairFramingBadSince[slot] = now;
+      } else if(now - pairFramingBadSince[slot] > FRAMING_GRACE_MS){
+        // inquadratura non valida da troppo tempo: azzera la fase di questo
+        // slot per non lasciare una ripetizione a metà corrotta da dati
+        // ormai inaffidabili, senza però interrompere la sessione di coppia
+        pairExStates[slot] = {};
+      }
+      continue;
+    }
+    pairFramingBadSince[slot] = null;
+
     // Scambia sulla persona di turno gli stessi stati globali che il motore
     // a una persona usa normalmente: da qui in poi, fino alla prossima
     // iterazione, ex.evaluate() e completeRep() operano sui dati di questo
@@ -6699,7 +6729,13 @@ function renderLoop(){
       return;
     }
 
-    const evalResult = ex.evaluate(lm);
+    // Come in modalità a coppie: se evaluate() lancia un'eccezione (per un
+    // caso limite non previsto in uno dei calcoli, es. una posa degenere),
+    // il frame va scartato senza interrompere il ciclo di rendering — un
+    // singolo evaluate() che va in errore non deve mai spegnere per sempre
+    // il feedback vocale e le altre elaborazioni per il resto della sessione.
+    let evalResult = null;
+    try{ evalResult = ex.evaluate(lm); } catch(err){ evalResult = null; }
 
     if(evalResult){
       // Tempo effettivo sotto sforzo su questo esercizio, indipendentemente
