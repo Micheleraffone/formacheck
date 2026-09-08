@@ -6566,7 +6566,14 @@ function renderPairFrame(result, now){
     if(personalThresholds) ex.thresholds = personalThresholds;
 
     let evalResult = null;
-    try{ evalResult = ex.evaluate(filteredLm); } catch(err){ evalResult = null; }
+    try{ evalResult = ex.evaluate(filteredLm); } catch(err){
+      evalResult = null;
+      // Log diagnostico: se questo scatta ripetutamente sul dispositivo di
+      // qualcuno, la console del browser dice finalmente QUALE eccezione è
+      // la causa reale, invece di lasciare solo un fotogramma scartato senza
+      // spiegazione.
+      console.error('[FormaCheck] ex.evaluate() (coppia, slot ' + slot + ') ha lanciato un\'eccezione:', err);
+    }
     ex.thresholds = sharedThresholds;
     if(!evalResult) continue;
 
@@ -6735,7 +6742,14 @@ function renderLoop(){
     // singolo evaluate() che va in errore non deve mai spegnere per sempre
     // il feedback vocale e le altre elaborazioni per il resto della sessione.
     let evalResult = null;
-    try{ evalResult = ex.evaluate(lm); } catch(err){ evalResult = null; }
+    try{ evalResult = ex.evaluate(lm); } catch(err){
+      evalResult = null;
+      // Log diagnostico: se questo scatta ripetutamente sul dispositivo di
+      // qualcuno, la console del browser dice finalmente QUALE eccezione è
+      // la causa reale, invece di lasciare solo un fotogramma scartato senza
+      // spiegazione.
+      console.error('[FormaCheck] ex.evaluate() ha lanciato un\'eccezione:', err);
+    }
 
     if(evalResult){
       // Tempo effettivo sotto sforzo su questo esercizio, indipendentemente
