@@ -889,6 +889,23 @@
       <div class="exercise-select" id="exerciseSelect"></div>
     </div>
 
+    <button class="btn" id="thresholdCalibBtn" style="display:none;">Taratura soglie personalizzata</button>
+    <div class="calib-status-note" id="thresholdCalibStatus" style="display:none;"></div>
+    <div class="calib-status-note" id="recalibSuggestBadge" style="display:none;">
+      💡 Precisione altissima nelle ultime sessioni: la tua tecnica sembra migliorata. Vuoi ricalibrare le soglie per una sfida più precisa?
+      <button class="calib-skip" id="recalibSuggestBtn" style="display:block; margin:6px auto 0;">Ricalibra ora</button>
+    </div>
+
+    <div id="repGoalRow" style="display:none; align-items:center; justify-content:center; gap:8px; font-size:11.5px; color:var(--ink-dim); padding-bottom:4px; flex-wrap:wrap;">
+      <span>Traguardo</span>
+      <input type="number" id="repGoalInput" min="1" value="10" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
+      <span id="repGoalUnit">ripetizioni</span>
+      <span style="opacity:.5;">·</span>
+      <span id="setsGoalUnit">serie</span>
+      <input type="number" id="setsGoalInput" min="1" value="1" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
+    </div>
+    <div class="calib-status-note" id="setBadge" style="display:none; text-align:center;"></div>
+
     <div class="view-badge" id="viewBadge">
       <div class="view-badge-icon" id="viewIcon">◐</div>
       <div>
@@ -981,6 +998,7 @@
 
     <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
     <button class="btn" id="reactionTestBtn" style="width:100%;" title="Test del tempo di reazione: un protocollo reale usato nel ritorno allo sport dopo infortunio e nell'allenamento neuromuscolare. Serve la fotocamera già avviata.">⏱️ Test tempo di reazione</button>
+    <div class="calib-status-note" id="reactionTestHint">Misura quanto ci metti a reagire a uno stimolo a comparsa casuale: lo stesso tipo di test usato nel ritorno allo sport dopo un infortunio, per valutare la prontezza neuromuscolare. Serve la fotocamera già avviata.</div>
 
     <div>
       <div class="section-label">Backup dati</div>
@@ -993,12 +1011,6 @@
     </div>
 
     <button class="btn" id="recalibBtn" style="display:none;">Ricalibra posizione</button>
-    <button class="btn" id="thresholdCalibBtn" style="display:none;">Taratura soglie personalizzata</button>
-    <div class="calib-status-note" id="thresholdCalibStatus" style="display:none;"></div>
-    <div class="calib-status-note" id="recalibSuggestBadge" style="display:none;">
-      💡 Precisione altissima nelle ultime sessioni: la tua tecnica sembra migliorata. Vuoi ricalibrare le soglie per una sfida più precisa?
-      <button class="calib-skip" id="recalibSuggestBtn" style="display:block; margin:6px auto 0;">Ricalibra ora</button>
-    </div>
     <button class="btn" id="refPoseBtn" style="display:none;">👤 Postura di riferimento disattivata — tocca per attivare</button>
     <button class="btn" id="restBtn" style="display:none;">Inizia riposo</button>
     <button class="btn" id="circuitCancelBtn" style="display:none;">Termina circuito</button>
@@ -1040,15 +1052,6 @@
       Qualità movimento (euristica) — A: <span id="pairQualityA" style="font-weight:700; color:var(--ink);">—</span> · B: <span id="pairQualityB" style="font-weight:700; color:var(--ink);">—</span>
     </div>
 
-    <div id="repGoalRow" style="display:none; align-items:center; justify-content:center; gap:8px; font-size:11.5px; color:var(--ink-dim); padding-bottom:4px; flex-wrap:wrap;">
-      <span>Traguardo</span>
-      <input type="number" id="repGoalInput" min="1" value="10" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
-      <span id="repGoalUnit">ripetizioni</span>
-      <span style="opacity:.5;">·</span>
-      <span id="setsGoalUnit">serie</span>
-      <input type="number" id="setsGoalInput" min="1" value="1" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
-    </div>
-    <div class="calib-status-note" id="setBadge" style="display:none; text-align:center;"></div>
     <button class="btn" id="apreBtn" style="width:100%; display:none;">🎯 Autoregolazione APRE disattivata — tocca per attivare</button>
     <div class="calib-status-note" id="apreHint" style="display:none; margin-top:8px; margin-bottom:8px;">Tra una serie e l'altra, alza o abbassa in automatico il traguardo di ripetizioni della serie successiva in base a come è andata quella appena conclusa (qualità della forma e velocità di esecuzione) — un'autoregolazione ispirata al protocollo APRE usato nello strength &amp; conditioning. Richiede almeno 2 serie.</div>
     <button class="btn" id="clusterBtn" style="width:100%; display:none;">🔄 Cluster set disattivato — tocca per attivare</button>
@@ -1061,6 +1064,7 @@
     </div>
     <div class="calib-status-note" id="clusterHint" style="display:none; margin-top:0; margin-bottom:8px;">Suddivide la serie in mini-blocchi con una breve pausa tra uno e l'altro, invece di ripetizioni continue: aiuta a mantenere la potenza alta invece di lasciarla calare per la fatica, come nel "cluster training" usato nell'allenamento della forza esplosiva.</div>
     <button class="btn" id="periodizationBtn" style="width:100%; display:none;" title="Alterna automaticamente accumulo, intensificazione e scarico su un ciclo di 4 settimane, scalando il traguardo base di una percentuale fissa per settimana. Si compone con l'autoregolazione APRE, se attiva anche quella.">🗓️ Periodizzazione disattivata — tocca per attivare</button>
+    <div class="calib-status-note" id="periodizationHint" style="display:none;">Alterna in automatico, settimana dopo settimana, fasi di accumulo, intensificazione e scarico su un ciclo di 4 settimane — invece di allenarti sempre con lo stesso traguardo, scala da solo quante ripetizioni chiederti a seconda della settimana del ciclo. Si combina con l'autoregolazione APRE, se attiva anche quella.</div>
     <div class="calib-status-note" id="periodizationBadge" style="display:none; margin-top:8px; margin-bottom:8px;"></div>
     <div id="singleRestPresetWrap" style="display:none;">
       <div class="section-label">Riposo tra le serie</div>
@@ -1245,6 +1249,7 @@ const clusterSizeInput = document.getElementById('clusterSizeInput');
 const clusterRestInput = document.getElementById('clusterRestInput');
 const clusterHint = document.getElementById('clusterHint');
 const periodizationBtn = document.getElementById('periodizationBtn');
+const periodizationHint = document.getElementById('periodizationHint');
 const periodizationBadge = document.getElementById('periodizationBadge');
 const singleRestPresetWrap = document.getElementById('singleRestPresetWrap');
 
@@ -5089,7 +5094,7 @@ function updateGoalUI(){
     repGoalRow.style.display = 'none'; setBadge.style.display = 'none'; singleRestPresetWrap.style.display = 'none';
     apreBtn.style.display = 'none'; apreHint.style.display = 'none';
     clusterBtn.style.display = 'none'; clusterConfigRow.style.display = 'none'; clusterHint.style.display = 'none';
-    periodizationBtn.style.display = 'none'; periodizationBadge.style.display = 'none';
+    periodizationBtn.style.display = 'none'; periodizationHint.style.display = 'none'; periodizationBadge.style.display = 'none';
     return;
   }
   const ex = EXERCISES[currentExercise];
@@ -5142,7 +5147,11 @@ function updateClusterBtn(){
   const show = appMode === 'single' && ex.mode === 'reps';
   clusterBtn.style.display = show ? 'block' : 'none';
   clusterConfigRow.style.display = (show && clusterEnabled) ? 'flex' : 'none';
-  clusterHint.style.display = (show && clusterEnabled) ? 'block' : 'none';
+  // Sempre visibile insieme al pulsante, non solo dopo averlo attivato:
+  // altrimenti non c'è modo di sapere cosa fa il cluster set prima di
+  // decidere se attivarlo (il title del pulsante è un tooltip da hover,
+  // inutile su telefono).
+  clusterHint.style.display = show ? 'block' : 'none';
   clusterBtn.textContent = clusterEnabled
     ? '🔄 Cluster set attivo — tocca per disattivare'
     : '🔄 Cluster set disattivato — tocca per attivare';
@@ -5182,6 +5191,9 @@ function updatePeriodizationBtn(){
   const ex = EXERCISES[currentExercise];
   const show = appMode === 'single' && ex.mode === 'reps';
   periodizationBtn.style.display = show ? 'block' : 'none';
+  // Sempre visibile insieme al pulsante, non solo dopo averlo attivato
+  // (il title del pulsante è un tooltip da hover, inutile su telefono).
+  periodizationHint.style.display = show ? 'block' : 'none';
   periodizationBtn.textContent = periodizationEnabled
     ? '🗓️ Periodizzazione attiva — tocca per disattivare'
     : '🗓️ Periodizzazione disattivata — tocca per attivare';
