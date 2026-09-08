@@ -943,6 +943,10 @@
       <div class="rep-label">tempo in tenuta corretta</div>
     </div>
 
+    <div id="qualityBadgeRow" style="display:none; text-align:center; padding-bottom:6px; font-size:11.5px; color:var(--ink-dim);" title="Punteggio euristico: combina pulizia della forma e scorrevolezza del movimento fotogramma per fotogramma. Non è un modello di intelligenza artificiale addestrato su dati reali.">
+      Qualità movimento (euristica): <span id="qualityBadgeValue" style="font-weight:700; color:var(--ink);">—</span>
+    </div>
+
     <div id="pairCountersRow" style="display:none; gap:10px; padding:6px 0 2px;">
       <div class="rep-counter" style="flex:1;">
         <div class="rep-num" id="pairNumA" style="color:#34d399;">0</div>
@@ -1021,6 +1025,8 @@ const repCounter = document.getElementById('repCounter');
 const repNum = document.getElementById('repNum');
 const timerCounter = document.getElementById('timerCounter');
 const timerNum = document.getElementById('timerNum');
+const qualityBadgeRow = document.getElementById('qualityBadgeRow');
+const qualityBadgeValue = document.getElementById('qualityBadgeValue');
 const calibOverlay = document.getElementById('calibOverlay');
 const calibChecklist = document.getElementById('calibChecklist');
 const calibBar = document.getElementById('calibBar');
@@ -1381,6 +1387,14 @@ let lastTimerTick = performance.now();
 let activeElapsedMs = 0; // tempo effettivo sotto sforzo sull'esercizio corrente (per la stima calorie)
 let lastActiveTick = performance.now();
 
+// Punteggio qualità del movimento (0-100): un EURISTICO geometrico, non un
+// modello addestrato — vedi trackQualityFrame più sotto per i dettagli e i
+// limiti. Copre solo la modalità a una persona (non la modalità coppia).
+let qCleanFrames = 0, qDirtyFrames = 0, qAllFrames = 0, qJerkEvents = 0;
+let qLastMetricValue = null, qLastMetricTime = null;
+let qualityTimerLastSampleAt = null;
+let qualityRepScores = []; // un punteggio per ogni ripetizione (o secondo di tenuta) della sessione corrente
+
 const VIEW_META = {
   laterale: { icon:'◐', title:'Vista laterale' },
   frontale: { icon:'◯', title:'Vista frontale' },
@@ -1455,6 +1469,7 @@ function completeRep(hadIssue, invalidMsg, validMsg){
   // qui è già disponibile la durata dell'intera ripetizione appena conclusa,
   // senza che ciascun esercizio debba calcolarla e passarla esplicitamente.
   const repDurationMs = exState.phaseStart != null ? performance.now() - exState.phaseStart : null;
+  recordQualitySample(); // chiude il punteggio qualità di questa ripetizione (valida o scartata)
   if(hadIssue){
     invalidRepCount++;
     const parts = Array.isArray(invalidMsg) ? invalidMsg : [invalidMsg || 'Ripetizione non conteggiata: correggi la forma e riprova.'];
@@ -1482,6 +1497,98 @@ function checkRepTempo(durationMs){
   }
   exState.repTempoSamples = (exState.repTempoSamples || 0) + 1;
   exState.repTempoEma = exState.repTempoEma == null ? durationMs : exState.repTempoEma * 0.7 + durationMs * 0.3;
+}
+
+// --- punteggio qualità del movimento (euristico, NON un'IA/ML) ---
+// Combina due segnali puramente geometrici, già disponibili per ogni
+// esercizio grazie a evaluate(), in un punteggio 0-100 più sfumato del solo
+// "valida/scartata": una ripetizione tecnicamente valida (supera le soglie)
+// può comunque essere poco pulita — es. più fotogrammi al limite delle
+// soglie che al centro, o un movimento a scatti invece che controllato.
+//   1. Pulizia della forma: quota di fotogrammi con evalResult.ok === true
+//      sul totale dei fotogrammi con un verdetto (esclude i fotogrammi con
+//      ok === null, cioè senza verdetto ancora, per non penalizzare
+//      ingiustamente le fasi di transizione di alcuni esercizi).
+//   2. Scorrevolezza: quanto spesso la metrica angolare primaria (quando è
+//      un angolo in gradi, non una percentuale o un'etichetta) cambia più
+//      velocemente di una soglia empirica — un proxy ragionevole, anche se
+//      non validato su dati reali, per un movimento "a scatti" o aiutato
+//      dallo slancio invece che controllato.
+// Il risultato è deliberatamente etichettato "euristico" in interfaccia:
+// non è un modello addestrato, solo una media pesata di soglie empiriche, e
+// va letto come un'indicazione di massima. Copre solo la modalità a una
+// persona: la modalità coppia non è (ancora) coperta.
+const QUALITY_JERK_DEG_PER_S = 260; // oltre questa velocità di variazione dell'angolo, consideriamo il movimento "a scatti"
+function trackQualityFrame(evalResult){
+  if(evalResult.ok === true){ qCleanFrames++; qAllFrames++; }
+  else if(evalResult.ok === false){ qDirtyFrames++; qAllFrames++; }
+  // evalResult.ok === null: nessun verdetto in questo fotogramma, non conta nella pulizia.
+
+  const primary = evalResult.metrics && evalResult.metrics[0];
+  const isAngle = primary && typeof primary.value === 'string' && primary.value.endsWith('°');
+  const now = performance.now();
+  if(isAngle){
+    const numeric = parseFloat(primary.value);
+    if(!isNaN(numeric)){
+      if(qLastMetricValue != null && qLastMetricTime != null){
+        const dt = (now - qLastMetricTime) / 1000;
+        // dt troppo grande = un buco (esercizio in pausa, inquadratura persa
+        // per un attimo): non è un vero segnale di velocità del movimento.
+        if(dt > 0 && dt < 0.5 && Math.abs(numeric - qLastMetricValue) / dt > QUALITY_JERK_DEG_PER_S) qJerkEvents++;
+      }
+      qLastMetricValue = numeric;
+      qLastMetricTime = now;
+    }
+  }
+
+  if(EXERCISES[currentExercise].mode === 'timer'){
+    // Nessuna "ripetizione" discreta in una tenuta: campiona un punteggio
+    // ogni secondo circa, così la media di sessione riflette l'intera durata.
+    if(qualityTimerLastSampleAt == null) qualityTimerLastSampleAt = now;
+    if(now - qualityTimerLastSampleAt >= 1000){
+      recordQualitySample();
+      qualityTimerLastSampleAt = now;
+    }
+  }
+}
+
+// Chiude il campione corrente (una ripetizione, o un secondo di tenuta),
+// calcola il suo punteggio e lo aggiunge alla media della sessione. Ritorna
+// il punteggio (null se non c'è stato alcun verdetto nel campione).
+function recordQualitySample(){
+  const totalVerdicts = qCleanFrames + qDirtyFrames;
+  let score = null;
+  if(totalVerdicts > 0){
+    const cleanRatio = qCleanFrames / totalVerdicts;
+    const jerkRatio = qAllFrames > 0 ? qJerkEvents / qAllFrames : 0;
+    const smoothScore = Math.max(0, 1 - jerkRatio * 4); // poche transizioni brusche pesano già molto
+    score = Math.round(Math.max(0, Math.min(100, cleanRatio * 70 + smoothScore * 30)));
+    qualityRepScores.push(score);
+    updateQualityBadge();
+  }
+  qCleanFrames = 0; qDirtyFrames = 0; qAllFrames = 0; qJerkEvents = 0;
+  return score;
+}
+
+function resetQualityTracking(){
+  qCleanFrames = 0; qDirtyFrames = 0; qAllFrames = 0; qJerkEvents = 0;
+  qLastMetricValue = null; qLastMetricTime = null;
+  qualityTimerLastSampleAt = null;
+  qualityRepScores = [];
+  updateQualityBadge();
+}
+
+function sessionAvgQuality(){
+  if(!qualityRepScores.length) return null;
+  return Math.round(qualityRepScores.reduce((a, b) => a + b, 0) / qualityRepScores.length);
+}
+
+function updateQualityBadge(){
+  const avg = sessionAvgQuality();
+  if(avg == null){ qualityBadgeRow.style.display = 'none'; return; }
+  qualityBadgeRow.style.display = 'block';
+  qualityBadgeValue.textContent = avg + '/100';
+  qualityBadgeValue.style.color = avg >= 80 ? 'var(--ok)' : avg >= 55 ? 'var(--ink)' : 'var(--bad)';
 }
 
 // Il motivo di scarto più frequente nella sessione corrente (per il riepilogo).
@@ -3523,7 +3630,10 @@ function logSessionIfActive(){
     // rilevare pattern ricorrenti su più sessioni (vedi
     // getRecurringErrorPattern), non solo il "più frequente" della sessione
     // corrente mostrato nel riepilogo a fine allenamento.
-    errorTally: Object.keys(sessionErrorTally).length ? sessionErrorTally : undefined
+    errorTally: Object.keys(sessionErrorTally).length ? sessionErrorTally : undefined,
+    // Punteggio qualità euristico medio della sessione (vedi
+    // trackQualityFrame): assente se non è mai stato calcolabile un verdetto.
+    avgQuality: sessionAvgQuality() ?? undefined
   });
 }
 
@@ -3536,7 +3646,7 @@ function aggregateHistory(){
     const dateStr = new Date(e.ts).toLocaleDateString('it-IT');
     const mapKey = dateStr + '|' + e.key;
     if(!map.has(mapKey)){
-      map.set(mapKey, { dateStr, key: e.key, label: e.label, mode: e.mode, valid: 0, invalid: 0, seconds: 0, ts: e.ts, errorTally: {} });
+      map.set(mapKey, { dateStr, key: e.key, label: e.label, mode: e.mode, valid: 0, invalid: 0, seconds: 0, ts: e.ts, errorTally: {}, qualitySum: 0, qualityWeight: 0 });
     }
     const agg = map.get(mapKey);
     agg.valid += e.valid || 0;
@@ -3548,8 +3658,19 @@ function aggregateHistory(){
         agg.errorTally[reason] = (agg.errorTally[reason] || 0) + e.errorTally[reason];
       });
     }
+    // Media pesata sul "volume" di ciascuna sessione (ripetizioni o secondi
+    // di tenuta), non una semplice media tra sessioni: una sessione lunga
+    // pesa di più di un tocco accidentale di pochi secondi.
+    if(e.avgQuality != null){
+      const weight = (e.valid || 0) + (e.invalid || 0) + (e.seconds || 0) || 1;
+      agg.qualitySum += e.avgQuality * weight;
+      agg.qualityWeight += weight;
+    }
   });
-  return [...map.values()].sort((a, b) => b.ts - a.ts);
+  return [...map.values()].sort((a, b) => b.ts - a.ts).map(agg => {
+    agg.avgQuality = agg.qualityWeight > 0 ? Math.round(agg.qualitySum / agg.qualityWeight) : null;
+    return agg;
+  });
 }
 
 // --- record personali ---
@@ -4515,6 +4636,7 @@ function resetMetrics(){
   timerSeconds = 0; timerNum.textContent = '0:00';
   exState = {};
   resetRealtimeIssueTracking();
+  resetQualityTracking();
   activeElapsedMs = 0;
   lastActiveTick = performance.now();
   feedbackList.innerHTML = '';
@@ -4610,6 +4732,11 @@ function showSessionSummary(onClose){
   }
   const topError = topErrorReason();
   if(topError) addRow('Errore più frequente', topError);
+  const avgQuality = sessionAvgQuality();
+  if(avgQuality != null){
+    addRow('Qualità movimento (euristica)', avgQuality + '/100');
+    summaryText += '\nQualità movimento: ' + avgQuality + '/100 (punteggio euristico, non un\'IA)';
+  }
   const activeSeconds = Math.round(activeElapsedMs / 1000);
   if(activeSeconds > 0){
     addRow('Tempo sotto sforzo', formatRestTime(activeSeconds));
@@ -4694,9 +4821,10 @@ function renderHistory(){
     row.className = 'circuit-summary-row';
     const total = r.valid + r.invalid;
     const accuracy = total > 0 ? Math.round((r.valid / total) * 100) : null;
-    const detail = r.mode === 'reps'
+    const detail = (r.mode === 'reps'
       ? r.valid + ' valide' + (r.invalid > 0 ? ' / ' + r.invalid + ' scartate' : '') + (accuracy != null ? ' (' + accuracy + '%)' : '')
-      : formatRestTime(r.seconds) + ' in tenuta corretta';
+      : formatRestTime(r.seconds) + ' in tenuta corretta')
+      + (r.avgQuality != null ? ' · qualità ' + r.avgQuality : '');
     row.innerHTML = '<span>' + r.dateStr + ' — ' + r.label + '</span><span>' + detail + '</span>';
     historyList.appendChild(row);
   });
@@ -5538,6 +5666,7 @@ function renderLoop(){
         el.textContent = m.value;
         el.className = 'metric-value' + (m.ok === true ? ' ok' : m.ok === false ? ' bad' : '');
       });
+      trackQualityFrame(evalResult);
 
       if(ex.mode === 'timer' && evalResult.ok){
         const tickNow = performance.now();
