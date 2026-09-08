@@ -2377,19 +2377,38 @@ function pumpSpeechQueue(){
   }, estimatedMs);
   try{
     if(synth.paused) synth.resume();
-    // cancel() prima di ogni speak(): il bug più comune di Chrome/Android è
-    // che il motore resti "impegnato" con un'utterance fantasma che il
-    // nostro stato interno non vede più (es. dopo il primissimo avviso), e
-    // da lì ogni speak() successiva viene accodata dal motore ma non
-    // pronunciata mai più. cancel() qui non interrompe nulla di nostro (la
-    // coda interna è già vuota a questo punto), ma sblocca quel fantasma.
-    // Eccezione: la primissima chiamata in assoluto (attivazione del
-    // vocale) non deve essere preceduta da nessun'altra chiamata nello
-    // stesso gesto utente, altrimenti Safari/iOS non la considera più
-    // "sbloccante" — vedi isFirstEverUtterance più sotto.
-    if(!isFirstEverUtterance) try{ synth.cancel(); } catch(e){ /* ignora */ }
-    isFirstEverUtterance = false;
-    synth.speak(utter);
+    if(isFirstEverUtterance){
+      // La primissima chiamata in assoluto (attivazione del vocale) non deve
+      // essere preceduta da nessun'altra chiamata a speechSynthesis nello
+      // stesso gesto utente, altrimenti Safari/iOS non la considera più
+      // "sbloccante" — vedi il commento su isFirstEverUtterance più sopra.
+      isFirstEverUtterance = false;
+      synth.speak(utter);
+    } else {
+      // cancel() prima di ogni speak() successiva: il bug più comune di
+      // Chrome/Android è che il motore resti "impegnato" con un'utterance
+      // fantasma che il nostro stato interno non vede più, e da lì ogni
+      // speak() successiva viene accodata dal motore ma non pronunciata mai
+      // più — il sintomo esatto di "il vocale ha detto una frase sola e poi
+      // è rimasto muto per tutto il resto della sessione".
+      // MA cancel() seguito da speak() nello STESSO istante ha un bug
+      // altrettanto noto e documentato su Chrome/Android: il motore non fa
+      // in tempo a liberarsi davvero prima che arrivi la nuova richiesta, e
+      // quella nuova richiesta viene accodata ma mai pronunciata — la stessa
+      // identica sintomatologia che cancel() qui doveva risolvere. Un breve
+      // ritardo tra le due chiamate è la mitigazione nota per questo bug.
+      synth.cancel();
+      setTimeout(() => {
+        // La frase è già stata risolta nel frattempo (es. dal watchdog), o
+        // l'utente ha disattivato il vocale mentre aspettavamo: non farla
+        // ripartire in ritardo.
+        if(settled || !voiceEnabled) return;
+        try{ synth.speak(utter); } catch(e){
+          console.warn('Sintesi vocale non disponibile:', e);
+          finishAndAdvance();
+        }
+      }, 60);
+    }
   } catch(e){
     console.warn('Sintesi vocale non disponibile:', e);
     finishAndAdvance();
