@@ -889,8 +889,6 @@
     <div>
       <div class="section-label">Feedback vocale</div>
       <button class="btn" id="voiceBtn" style="width:100%;">🔈 Vocale disattivato — tocca per attivare</button>
-      <button class="btn" id="neuralTtsBtn" style="width:100%; margin-top:8px; display:none;">🧠 Voce naturale (sperimentale) disattivata — tocca per attivare</button>
-      <div class="calib-status-note" id="neuralTtsHint" style="display:none; margin-top:8px;">Sostituisce la voce di sistema con una sintesi vocale neurale più naturale, calcolata sul telefono (nessun dato inviato a server). Richiede di scaricare un modello vocale (qualche decina di MB) al primo utilizzo: può richiedere qualche secondo, e serve una connessione la prima volta.</div>
     </div>
 
     <div>
@@ -1048,8 +1046,6 @@ const thresholdCalibBar = document.getElementById('thresholdCalibBar');
 const thresholdCalibCancel = document.getElementById('thresholdCalibCancel');
 const camButtons = document.querySelectorAll('.cam-btn[data-facing]');
 const voiceBtn = document.getElementById('voiceBtn');
-const neuralTtsBtn = document.getElementById('neuralTtsBtn');
-const neuralTtsHint = document.getElementById('neuralTtsHint');
 const captionsBtn = document.getElementById('captionsBtn');
 const captionOverlay = document.getElementById('captionOverlay');
 const voiceCommandBtn = document.getElementById('voiceCommandBtn');
@@ -1808,13 +1804,6 @@ function speak(text){
 
 function pumpSpeechQueue(){
   if(speechBusy || speechQueue.length === 0) return;
-  if(neuralTtsEnabled && !piperLoadFailed){
-    const text = speechQueue.shift();
-    speechBusy = true;
-    syncRecognition();
-    speakWithPiper(text);
-    return;
-  }
   const text = speechQueue.shift();
   const synth = window.speechSynthesis;
 
@@ -1930,145 +1919,12 @@ if(speechSupported){
   }, 4000);
 }
 
-// --- sintesi vocale neurale (sperimentale, opzionale) ---
-// Piper (https://github.com/rhasspy/piper) eseguito interamente nel browser
-// via WebAssembly: una voce sensibilmente più naturale di quella di sistema,
-// calcolata sul telefono (nessun audio/testo inviato a un server). Va
-// scaricato un modello vocale al primo utilizzo (una decina di MB) — per
-// questo resta un'opzione a parte, spenta di default, che non sostituisce
-// mai la sintesi nativa: se il caricamento fallisce per qualunque motivo
-// (rete assente, browser non supportato, CDN irraggiungibile) si torna da
-// soli alla voce di sistema, frase per frase se serve, senza che l'utente
-// debba accorgersene a metà allenamento.
-const NEURAL_TTS_STORAGE_KEY = 'formacheck_neuraltts_v1';
-const PIPER_MODULE_URL = 'https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1/dist/piper-tts-web.mjs';
-let neuralTtsEnabled = false;
-try{ neuralTtsEnabled = localStorage.getItem(NEURAL_TTS_STORAGE_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
-let piperModule = null;
-let piperVoiceId = null;
-let piperReadyPromise = null;
-let piperLoadFailed = false;
-
-function extractVoiceId(entry){
-  if(typeof entry === 'string') return entry;
-  if(entry && typeof entry === 'object') return entry.key || entry.id || entry.name || entry.voiceId || null;
-  return null;
-}
-
-// Carica il modulo e sceglie una voce italiana (convenzione Piper:
-// "it_IT-<nome>-<qualità>"), evitando esplicitamente le varianti "x_low"
-// quando ne esiste una migliore. Il risultato resta in cache per la sessione:
-// le chiamate successive non ripetono il download.
-async function ensurePiperReady(){
-  if(piperModule && piperVoiceId) return true;
-  if(piperLoadFailed) return false;
-  if(!piperReadyPromise){
-    piperReadyPromise = (async () => {
-      const mod = await import(PIPER_MODULE_URL);
-      const voices = await mod.voices();
-      const candidates = (voices || []).map(extractVoiceId).filter(Boolean);
-      const italian = candidates.filter(id => /it[-_]it/i.test(id));
-      if(italian.length === 0) throw new Error('Nessuna voce italiana disponibile per la sintesi neurale.');
-      piperVoiceId = italian.find(id => !/x_low/i.test(id)) || italian[0];
-      piperModule = mod;
-      return true;
-    })().catch(err => {
-      piperLoadFailed = true;
-      console.warn('Sintesi vocale neurale non disponibile, resto sulla voce di sistema:', err);
-      throw err;
-    });
-  }
-  try{ await piperReadyPromise; return true; } catch(e){ return false; }
-}
-
-// Stesso contratto "occupato finché non finisce" del motore nativo
-// (speechBusy/speechWatchdog/forceFinishSpeech/pumpSpeechQueue), ma
-// implementato separatamente invece di condividere codice con
-// pumpSpeechQueue(): quel percorso è stato indurito da diversi bug reali in
-// produzione (motore che si blocca, utterance fantasma, ecc.) ed è meglio
-// non rimetterlo in discussione per una funzionalità sperimentale.
-async function speakWithPiper(text){
-  const ready = await ensurePiperReady();
-  if(!ready){
-    // il modello non è disponibile: la stessa frase torna in testa alla coda
-    // e verrà pronunciata dal motore nativo al prossimo giro
-    speechBusy = false;
-    speechQueue.unshift(text);
-    pumpSpeechQueue();
-    return;
-  }
-  let settled = false;
-  let audio = null;
-  const finish = () => {
-    if(settled) return;
-    settled = true;
-    if(speechWatchdog){ clearTimeout(speechWatchdog); speechWatchdog = null; }
-    forceFinishSpeech = null;
-    if(audio) livingUtterances = livingUtterances.filter(u => u !== audio);
-    speechBusy = false;
-    syncRecognition();
-    pumpSpeechQueue();
-  };
-  // Stima più larga di quella nativa: include anche il tempo di sintesi
-  // (calcolo locale, non istantaneo), non solo la durata dell'audio risultante.
-  const estimatedMs = 3000 + text.length * 120;
-  speechWatchdog = setTimeout(() => {
-    console.warn('Sintesi vocale neurale: nessuna conferma di fine entro il tempo previsto, sblocco la coda.');
-    if(audio) try{ audio.pause(); } catch(e){ /* ignora */ }
-    finish();
-  }, estimatedMs);
-  try{
-    const wav = await piperModule.predict({ text, voiceId: piperVoiceId });
-    audio = new Audio(URL.createObjectURL(wav));
-    livingUtterances.push(audio);
-    forceFinishSpeech = finish;
-    audio.onended = finish;
-    audio.onerror = finish;
-    await audio.play();
-  } catch(err){
-    // fallimento su QUESTA frase soltanto (non sul modello in generale):
-    // riprova subito con la voce di sistema, senza disattivare la neurale
-    // per il resto della sessione.
-    console.warn('Sintesi vocale neurale non riuscita su questa frase, passo alla voce di sistema:', err);
-    speechQueue.unshift(text);
-    finish();
-  }
-}
-
-function updateNeuralTtsBtn(){
-  const show = speechSupported && voiceEnabled;
-  neuralTtsBtn.style.display = show ? 'block' : 'none';
-  neuralTtsHint.style.display = (show && neuralTtsEnabled) ? 'block' : 'none';
-  neuralTtsBtn.textContent = neuralTtsEnabled
-    ? '🧠 Voce naturale (sperimentale) attiva — tocca per disattivare'
-    : '🧠 Voce naturale (sperimentale) disattivata — tocca per attivare';
-  neuralTtsBtn.classList.toggle('primary', neuralTtsEnabled);
-}
-if(speechSupported) updateNeuralTtsBtn();
-
-neuralTtsBtn.addEventListener('click', async () => {
-  neuralTtsEnabled = !neuralTtsEnabled;
-  updateNeuralTtsBtn();
-  try{ localStorage.setItem(NEURAL_TTS_STORAGE_KEY, neuralTtsEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
-  if(neuralTtsEnabled){
-    pushFeedback('Preparazione voce naturale in corso, il primo utilizzo può richiedere qualche secondo…', true);
-    const ready = await ensurePiperReady();
-    if(!ready){
-      neuralTtsEnabled = false;
-      updateNeuralTtsBtn();
-      try{ localStorage.setItem(NEURAL_TTS_STORAGE_KEY, '0'); } catch(e){ /* storage non disponibile */ }
-      pushFeedback('Voce naturale non disponibile su questo dispositivo/browser: resto sulla voce di sistema.', false);
-    }
-  }
-});
-
 function updateVoiceBtn(){
   const icon = '<span class="btn-icon">' + (voiceEnabled ? ICONS.volumeOn : ICONS.volumeOff) + '</span>';
   voiceBtn.innerHTML = icon + (voiceEnabled
     ? 'Vocale attivo — tocca per disattivare'
     : 'Vocale disattivato — tocca per attivare');
   voiceBtn.classList.toggle('primary', voiceEnabled);
-  updateNeuralTtsBtn();
 }
 
 voiceBtn.addEventListener('click', () => {
