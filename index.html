@@ -889,6 +889,8 @@
     <div>
       <div class="section-label">Feedback vocale</div>
       <button class="btn" id="voiceBtn" style="width:100%;">🔈 Vocale disattivato — tocca per attivare</button>
+      <button class="btn" id="neuralTtsBtn" style="width:100%; margin-top:8px; display:none;">🧠 Voce naturale (sperimentale) disattivata — tocca per attivare</button>
+      <div class="calib-status-note" id="neuralTtsHint" style="display:none; margin-top:8px;">Sostituisce la voce di sistema con una sintesi vocale neurale più naturale, calcolata sul telefono (nessun dato inviato a server). Richiede di scaricare un modello vocale (qualche decina di MB) al primo utilizzo: può richiedere qualche secondo, e serve una connessione la prima volta.</div>
     </div>
 
     <div>
@@ -900,6 +902,8 @@
       <div class="section-label">Comando vocale</div>
       <button class="btn" id="voiceCommandBtn" style="width:100%;">🎙️ Comando vocale disattivato — tocca per attivare</button>
       <div class="calib-status-note" id="voiceCommandHint" style="display:none; margin-top:8px;">Di' "avanti" per passare all'esercizio successivo nel circuito, "salta" per saltare il riposo, "pausa"/"riprendi" per fermarti e ripartire — senza toccare lo schermo.</div>
+      <button class="btn" id="neuralSttBtn" style="width:100%; margin-top:8px; display:none;">🧠 Riconoscimento locale (sperimentale) disattivato — tocca per attivare</button>
+      <div class="calib-status-note" id="neuralSttHint" style="display:none; margin-top:8px;">Riconosce i comandi con un modello calcolato interamente sul telefono, invece di affidarsi al servizio del browser: funziona anche offline dopo il primo download (qualche decina di MB) e non invia l'audio a nessun server. Un po' meno reattivo di quello nativo (analizza brevi finestre audio invece di ascoltare in continuo).</div>
     </div>
 
     <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
@@ -937,6 +941,10 @@
     <div id="timerCounter" style="display:none; text-align:center; padding:6px 0 2px;">
       <div class="rep-num" id="timerNum">0:00</div>
       <div class="rep-label">tempo in tenuta corretta</div>
+    </div>
+
+    <div id="qualityBadgeRow" style="display:none; text-align:center; padding-bottom:6px; font-size:11.5px; color:var(--ink-dim);" title="Punteggio euristico: combina pulizia della forma e scorrevolezza del movimento fotogramma per fotogramma. Non è un modello di intelligenza artificiale addestrato su dati reali.">
+      Qualità movimento (euristica): <span id="qualityBadgeValue" style="font-weight:700; color:var(--ink);">—</span>
     </div>
 
     <div id="pairCountersRow" style="display:none; gap:10px; padding:6px 0 2px;">
@@ -1017,6 +1025,8 @@ const repCounter = document.getElementById('repCounter');
 const repNum = document.getElementById('repNum');
 const timerCounter = document.getElementById('timerCounter');
 const timerNum = document.getElementById('timerNum');
+const qualityBadgeRow = document.getElementById('qualityBadgeRow');
+const qualityBadgeValue = document.getElementById('qualityBadgeValue');
 const calibOverlay = document.getElementById('calibOverlay');
 const calibChecklist = document.getElementById('calibChecklist');
 const calibBar = document.getElementById('calibBar');
@@ -1034,10 +1044,14 @@ const thresholdCalibBar = document.getElementById('thresholdCalibBar');
 const thresholdCalibCancel = document.getElementById('thresholdCalibCancel');
 const camButtons = document.querySelectorAll('.cam-btn[data-facing]');
 const voiceBtn = document.getElementById('voiceBtn');
+const neuralTtsBtn = document.getElementById('neuralTtsBtn');
+const neuralTtsHint = document.getElementById('neuralTtsHint');
 const captionsBtn = document.getElementById('captionsBtn');
 const captionOverlay = document.getElementById('captionOverlay');
 const voiceCommandBtn = document.getElementById('voiceCommandBtn');
 const voiceCommandHint = document.getElementById('voiceCommandHint');
+const neuralSttBtn = document.getElementById('neuralSttBtn');
+const neuralSttHint = document.getElementById('neuralSttHint');
 
 const modeSelect = document.getElementById('modeSelect');
 const singleModeSection = document.getElementById('singleModeSection');
@@ -1373,6 +1387,14 @@ let lastTimerTick = performance.now();
 let activeElapsedMs = 0; // tempo effettivo sotto sforzo sull'esercizio corrente (per la stima calorie)
 let lastActiveTick = performance.now();
 
+// Punteggio qualità del movimento (0-100): un EURISTICO geometrico, non un
+// modello addestrato — vedi trackQualityFrame più sotto per i dettagli e i
+// limiti. Copre solo la modalità a una persona (non la modalità coppia).
+let qCleanFrames = 0, qDirtyFrames = 0, qAllFrames = 0, qJerkEvents = 0;
+let qLastMetricValue = null, qLastMetricTime = null;
+let qualityTimerLastSampleAt = null;
+let qualityRepScores = []; // un punteggio per ogni ripetizione (o secondo di tenuta) della sessione corrente
+
 const VIEW_META = {
   laterale: { icon:'◐', title:'Vista laterale' },
   frontale: { icon:'◯', title:'Vista frontale' },
@@ -1447,6 +1469,7 @@ function completeRep(hadIssue, invalidMsg, validMsg){
   // qui è già disponibile la durata dell'intera ripetizione appena conclusa,
   // senza che ciascun esercizio debba calcolarla e passarla esplicitamente.
   const repDurationMs = exState.phaseStart != null ? performance.now() - exState.phaseStart : null;
+  recordQualitySample(); // chiude il punteggio qualità di questa ripetizione (valida o scartata)
   if(hadIssue){
     invalidRepCount++;
     const parts = Array.isArray(invalidMsg) ? invalidMsg : [invalidMsg || 'Ripetizione non conteggiata: correggi la forma e riprova.'];
@@ -1474,6 +1497,98 @@ function checkRepTempo(durationMs){
   }
   exState.repTempoSamples = (exState.repTempoSamples || 0) + 1;
   exState.repTempoEma = exState.repTempoEma == null ? durationMs : exState.repTempoEma * 0.7 + durationMs * 0.3;
+}
+
+// --- punteggio qualità del movimento (euristico, NON un'IA/ML) ---
+// Combina due segnali puramente geometrici, già disponibili per ogni
+// esercizio grazie a evaluate(), in un punteggio 0-100 più sfumato del solo
+// "valida/scartata": una ripetizione tecnicamente valida (supera le soglie)
+// può comunque essere poco pulita — es. più fotogrammi al limite delle
+// soglie che al centro, o un movimento a scatti invece che controllato.
+//   1. Pulizia della forma: quota di fotogrammi con evalResult.ok === true
+//      sul totale dei fotogrammi con un verdetto (esclude i fotogrammi con
+//      ok === null, cioè senza verdetto ancora, per non penalizzare
+//      ingiustamente le fasi di transizione di alcuni esercizi).
+//   2. Scorrevolezza: quanto spesso la metrica angolare primaria (quando è
+//      un angolo in gradi, non una percentuale o un'etichetta) cambia più
+//      velocemente di una soglia empirica — un proxy ragionevole, anche se
+//      non validato su dati reali, per un movimento "a scatti" o aiutato
+//      dallo slancio invece che controllato.
+// Il risultato è deliberatamente etichettato "euristico" in interfaccia:
+// non è un modello addestrato, solo una media pesata di soglie empiriche, e
+// va letto come un'indicazione di massima. Copre solo la modalità a una
+// persona: la modalità coppia non è (ancora) coperta.
+const QUALITY_JERK_DEG_PER_S = 260; // oltre questa velocità di variazione dell'angolo, consideriamo il movimento "a scatti"
+function trackQualityFrame(evalResult){
+  if(evalResult.ok === true){ qCleanFrames++; qAllFrames++; }
+  else if(evalResult.ok === false){ qDirtyFrames++; qAllFrames++; }
+  // evalResult.ok === null: nessun verdetto in questo fotogramma, non conta nella pulizia.
+
+  const primary = evalResult.metrics && evalResult.metrics[0];
+  const isAngle = primary && typeof primary.value === 'string' && primary.value.endsWith('°');
+  const now = performance.now();
+  if(isAngle){
+    const numeric = parseFloat(primary.value);
+    if(!isNaN(numeric)){
+      if(qLastMetricValue != null && qLastMetricTime != null){
+        const dt = (now - qLastMetricTime) / 1000;
+        // dt troppo grande = un buco (esercizio in pausa, inquadratura persa
+        // per un attimo): non è un vero segnale di velocità del movimento.
+        if(dt > 0 && dt < 0.5 && Math.abs(numeric - qLastMetricValue) / dt > QUALITY_JERK_DEG_PER_S) qJerkEvents++;
+      }
+      qLastMetricValue = numeric;
+      qLastMetricTime = now;
+    }
+  }
+
+  if(EXERCISES[currentExercise].mode === 'timer'){
+    // Nessuna "ripetizione" discreta in una tenuta: campiona un punteggio
+    // ogni secondo circa, così la media di sessione riflette l'intera durata.
+    if(qualityTimerLastSampleAt == null) qualityTimerLastSampleAt = now;
+    if(now - qualityTimerLastSampleAt >= 1000){
+      recordQualitySample();
+      qualityTimerLastSampleAt = now;
+    }
+  }
+}
+
+// Chiude il campione corrente (una ripetizione, o un secondo di tenuta),
+// calcola il suo punteggio e lo aggiunge alla media della sessione. Ritorna
+// il punteggio (null se non c'è stato alcun verdetto nel campione).
+function recordQualitySample(){
+  const totalVerdicts = qCleanFrames + qDirtyFrames;
+  let score = null;
+  if(totalVerdicts > 0){
+    const cleanRatio = qCleanFrames / totalVerdicts;
+    const jerkRatio = qAllFrames > 0 ? qJerkEvents / qAllFrames : 0;
+    const smoothScore = Math.max(0, 1 - jerkRatio * 4); // poche transizioni brusche pesano già molto
+    score = Math.round(Math.max(0, Math.min(100, cleanRatio * 70 + smoothScore * 30)));
+    qualityRepScores.push(score);
+    updateQualityBadge();
+  }
+  qCleanFrames = 0; qDirtyFrames = 0; qAllFrames = 0; qJerkEvents = 0;
+  return score;
+}
+
+function resetQualityTracking(){
+  qCleanFrames = 0; qDirtyFrames = 0; qAllFrames = 0; qJerkEvents = 0;
+  qLastMetricValue = null; qLastMetricTime = null;
+  qualityTimerLastSampleAt = null;
+  qualityRepScores = [];
+  updateQualityBadge();
+}
+
+function sessionAvgQuality(){
+  if(!qualityRepScores.length) return null;
+  return Math.round(qualityRepScores.reduce((a, b) => a + b, 0) / qualityRepScores.length);
+}
+
+function updateQualityBadge(){
+  const avg = sessionAvgQuality();
+  if(avg == null){ qualityBadgeRow.style.display = 'none'; return; }
+  qualityBadgeRow.style.display = 'block';
+  qualityBadgeValue.textContent = avg + '/100';
+  qualityBadgeValue.style.color = avg >= 80 ? 'var(--ok)' : avg >= 55 ? 'var(--ink)' : 'var(--bad)';
 }
 
 // Il motivo di scarto più frequente nella sessione corrente (per il riepilogo).
@@ -1677,6 +1792,13 @@ function speak(text){
 
 function pumpSpeechQueue(){
   if(speechBusy || speechQueue.length === 0) return;
+  if(neuralTtsEnabled && !piperLoadFailed){
+    const text = speechQueue.shift();
+    speechBusy = true;
+    syncRecognition();
+    speakWithPiper(text);
+    return;
+  }
   const text = speechQueue.shift();
   const synth = window.speechSynthesis;
 
@@ -1792,12 +1914,145 @@ if(speechSupported){
   }, 4000);
 }
 
+// --- sintesi vocale neurale (sperimentale, opzionale) ---
+// Piper (https://github.com/rhasspy/piper) eseguito interamente nel browser
+// via WebAssembly: una voce sensibilmente più naturale di quella di sistema,
+// calcolata sul telefono (nessun audio/testo inviato a un server). Va
+// scaricato un modello vocale al primo utilizzo (una decina di MB) — per
+// questo resta un'opzione a parte, spenta di default, che non sostituisce
+// mai la sintesi nativa: se il caricamento fallisce per qualunque motivo
+// (rete assente, browser non supportato, CDN irraggiungibile) si torna da
+// soli alla voce di sistema, frase per frase se serve, senza che l'utente
+// debba accorgersene a metà allenamento.
+const NEURAL_TTS_STORAGE_KEY = 'formacheck_neuraltts_v1';
+const PIPER_MODULE_URL = 'https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1/dist/piper-tts-web.mjs';
+let neuralTtsEnabled = false;
+try{ neuralTtsEnabled = localStorage.getItem(NEURAL_TTS_STORAGE_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
+let piperModule = null;
+let piperVoiceId = null;
+let piperReadyPromise = null;
+let piperLoadFailed = false;
+
+function extractVoiceId(entry){
+  if(typeof entry === 'string') return entry;
+  if(entry && typeof entry === 'object') return entry.key || entry.id || entry.name || entry.voiceId || null;
+  return null;
+}
+
+// Carica il modulo e sceglie una voce italiana (convenzione Piper:
+// "it_IT-<nome>-<qualità>"), evitando esplicitamente le varianti "x_low"
+// quando ne esiste una migliore. Il risultato resta in cache per la sessione:
+// le chiamate successive non ripetono il download.
+async function ensurePiperReady(){
+  if(piperModule && piperVoiceId) return true;
+  if(piperLoadFailed) return false;
+  if(!piperReadyPromise){
+    piperReadyPromise = (async () => {
+      const mod = await import(PIPER_MODULE_URL);
+      const voices = await mod.voices();
+      const candidates = (voices || []).map(extractVoiceId).filter(Boolean);
+      const italian = candidates.filter(id => /it[-_]it/i.test(id));
+      if(italian.length === 0) throw new Error('Nessuna voce italiana disponibile per la sintesi neurale.');
+      piperVoiceId = italian.find(id => !/x_low/i.test(id)) || italian[0];
+      piperModule = mod;
+      return true;
+    })().catch(err => {
+      piperLoadFailed = true;
+      console.warn('Sintesi vocale neurale non disponibile, resto sulla voce di sistema:', err);
+      throw err;
+    });
+  }
+  try{ await piperReadyPromise; return true; } catch(e){ return false; }
+}
+
+// Stesso contratto "occupato finché non finisce" del motore nativo
+// (speechBusy/speechWatchdog/forceFinishSpeech/pumpSpeechQueue), ma
+// implementato separatamente invece di condividere codice con
+// pumpSpeechQueue(): quel percorso è stato indurito da diversi bug reali in
+// produzione (motore che si blocca, utterance fantasma, ecc.) ed è meglio
+// non rimetterlo in discussione per una funzionalità sperimentale.
+async function speakWithPiper(text){
+  const ready = await ensurePiperReady();
+  if(!ready){
+    // il modello non è disponibile: la stessa frase torna in testa alla coda
+    // e verrà pronunciata dal motore nativo al prossimo giro
+    speechBusy = false;
+    speechQueue.unshift(text);
+    pumpSpeechQueue();
+    return;
+  }
+  let settled = false;
+  let audio = null;
+  const finish = () => {
+    if(settled) return;
+    settled = true;
+    if(speechWatchdog){ clearTimeout(speechWatchdog); speechWatchdog = null; }
+    forceFinishSpeech = null;
+    if(audio) livingUtterances = livingUtterances.filter(u => u !== audio);
+    speechBusy = false;
+    syncRecognition();
+    pumpSpeechQueue();
+  };
+  // Stima più larga di quella nativa: include anche il tempo di sintesi
+  // (calcolo locale, non istantaneo), non solo la durata dell'audio risultante.
+  const estimatedMs = 3000 + text.length * 120;
+  speechWatchdog = setTimeout(() => {
+    console.warn('Sintesi vocale neurale: nessuna conferma di fine entro il tempo previsto, sblocco la coda.');
+    if(audio) try{ audio.pause(); } catch(e){ /* ignora */ }
+    finish();
+  }, estimatedMs);
+  try{
+    const wav = await piperModule.predict({ text, voiceId: piperVoiceId });
+    audio = new Audio(URL.createObjectURL(wav));
+    livingUtterances.push(audio);
+    forceFinishSpeech = finish;
+    audio.onended = finish;
+    audio.onerror = finish;
+    await audio.play();
+  } catch(err){
+    // fallimento su QUESTA frase soltanto (non sul modello in generale):
+    // riprova subito con la voce di sistema, senza disattivare la neurale
+    // per il resto della sessione.
+    console.warn('Sintesi vocale neurale non riuscita su questa frase, passo alla voce di sistema:', err);
+    speechQueue.unshift(text);
+    finish();
+  }
+}
+
+function updateNeuralTtsBtn(){
+  const show = speechSupported && voiceEnabled;
+  neuralTtsBtn.style.display = show ? 'block' : 'none';
+  neuralTtsHint.style.display = (show && neuralTtsEnabled) ? 'block' : 'none';
+  neuralTtsBtn.textContent = neuralTtsEnabled
+    ? '🧠 Voce naturale (sperimentale) attiva — tocca per disattivare'
+    : '🧠 Voce naturale (sperimentale) disattivata — tocca per attivare';
+  neuralTtsBtn.classList.toggle('primary', neuralTtsEnabled);
+}
+if(speechSupported) updateNeuralTtsBtn();
+
+neuralTtsBtn.addEventListener('click', async () => {
+  neuralTtsEnabled = !neuralTtsEnabled;
+  updateNeuralTtsBtn();
+  try{ localStorage.setItem(NEURAL_TTS_STORAGE_KEY, neuralTtsEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
+  if(neuralTtsEnabled){
+    pushFeedback('Preparazione voce naturale in corso, il primo utilizzo può richiedere qualche secondo…', true);
+    const ready = await ensurePiperReady();
+    if(!ready){
+      neuralTtsEnabled = false;
+      updateNeuralTtsBtn();
+      try{ localStorage.setItem(NEURAL_TTS_STORAGE_KEY, '0'); } catch(e){ /* storage non disponibile */ }
+      pushFeedback('Voce naturale non disponibile su questo dispositivo/browser: resto sulla voce di sistema.', false);
+    }
+  }
+});
+
 function updateVoiceBtn(){
   const icon = '<span class="btn-icon">' + (voiceEnabled ? ICONS.volumeOn : ICONS.volumeOff) + '</span>';
   voiceBtn.innerHTML = icon + (voiceEnabled
     ? 'Vocale attivo — tocca per disattivare'
     : 'Vocale disattivato — tocca per attivare');
   voiceBtn.classList.toggle('primary', voiceEnabled);
+  updateNeuralTtsBtn();
 }
 
 voiceBtn.addEventListener('click', () => {
@@ -1912,6 +2167,13 @@ const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRec
 const voiceCommandSupported = !!SpeechRecognitionCtor;
 let voiceCommandEnabled = false;
 try{ voiceCommandEnabled = voiceCommandSupported && localStorage.getItem(VOICE_COMMAND_STORAGE_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
+// Dichiarata già qui (non più sotto, insieme al resto del modulo Whisper)
+// perché updateVoiceCommandBtn() la legge tramite updateNeuralSttBtn() fin
+// dalla primissima chiamata, sincrona, in fondo a questa stessa sezione —
+// prima di questa riga darebbe "accesso prima dell'inizializzazione".
+const NEURAL_STT_STORAGE_KEY = 'formacheck_neuralstt_v1';
+let neuralSttEnabled = false;
+try{ neuralSttEnabled = voiceCommandSupported && localStorage.getItem(NEURAL_STT_STORAGE_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
 let recognition = null;
 let recognitionListening = false;
 let recognitionDeniedWarned = false;
@@ -1921,6 +2183,7 @@ function updateVoiceCommandBtn(){
     voiceCommandBtn.disabled = true;
     voiceCommandBtn.textContent = '🎙️ Comando vocale non supportato su questo browser';
     voiceCommandHint.style.display = 'none';
+    updateNeuralSttBtn();
     return;
   }
   voiceCommandBtn.textContent = voiceCommandEnabled
@@ -1928,6 +2191,7 @@ function updateVoiceCommandBtn(){
     : '🎙️ Comando vocale disattivato — tocca per attivare';
   voiceCommandBtn.classList.toggle('primary', voiceCommandEnabled);
   voiceCommandHint.style.display = voiceCommandEnabled ? 'block' : 'none';
+  updateNeuralSttBtn();
 }
 updateVoiceCommandBtn();
 
@@ -1937,7 +2201,7 @@ updateVoiceCommandBtn();
 // proprio feedback vocale dagli altoparlanti e scambiarlo per un comando:
 // alcune frasi di correzione contengono parole come "avanti").
 function shouldListenForCommands(){
-  return voiceCommandEnabled && running && !speechBusy;
+  return voiceCommandEnabled && !neuralSttEnabled && running && !speechBusy;
 }
 
 function ensureRecognition(){
@@ -2016,6 +2280,169 @@ voiceCommandBtn.addEventListener('click', () => {
   updateVoiceCommandBtn();
   try{ localStorage.setItem(VOICE_COMMAND_STORAGE_KEY, voiceCommandEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
   syncRecognition();
+  if(!voiceCommandEnabled) stopWhisperListening();
+  else if(neuralSttEnabled) startWhisperListening();
+});
+
+// --- riconoscimento vocale locale (sperimentale, opzionale) ---
+// Whisper "tiny" (multilingua), eseguito interamente nel browser via
+// transformers.js/WebAssembly, invece del riconoscimento nativo del browser
+// (che su Chrome/Android invia l'audio ai server di Google per la
+// trascrizione). Va scaricato il modello al primo utilizzo (circa 40MB) —
+// per questo resta un'opzione a parte, spenta di default, disponibile solo
+// quando il comando vocale è già attivo. A differenza di quello nativo (un
+// ascolto continuo in streaming), analizza a turno brevi finestre audio
+// registrate una alla volta: un po' meno reattivo, compromesso accettabile
+// per funzionare offline e senza inviare l'audio a nessun server.
+const WHISPER_MODULE_URL = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+const WHISPER_CHUNK_MS = 3200;
+let whisperPipelinePromise = null;
+let whisperLoadFailed = false;
+let whisperStream = null;
+
+async function ensureWhisperReady(){
+  if(whisperLoadFailed) return null;
+  if(!whisperPipelinePromise){
+    whisperPipelinePromise = (async () => {
+      const { pipeline } = await import(WHISPER_MODULE_URL);
+      return await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny');
+    })().catch(err => {
+      whisperLoadFailed = true;
+      console.warn('Riconoscimento vocale locale non disponibile, resto su quello nativo:', err);
+      return null;
+    });
+  }
+  return whisperPipelinePromise;
+}
+
+// Whisper richiede l'audio grezzo a 16kHz mono: la registrazione dal
+// microfono arriva invece alla frequenza/canali del dispositivo, quindi va
+// ricampionata prima di passarla al modello (validato con test sintetici:
+// preserva durata e frequenza, gestisce stereo->mono e l'ingresso già a 16kHz).
+function mixToMonoAudio(buffer){
+  if(buffer.numberOfChannels === 1) return buffer.getChannelData(0);
+  const len = buffer.length;
+  const out = new Float32Array(len);
+  for(let c = 0; c < buffer.numberOfChannels; c++){
+    const data = buffer.getChannelData(c);
+    for(let i = 0; i < len; i++) out[i] += data[i] / buffer.numberOfChannels;
+  }
+  return out;
+}
+function resampleTo16kMono(buffer){
+  const targetRate = 16000;
+  const mono = mixToMonoAudio(buffer);
+  if(buffer.sampleRate === targetRate) return mono.slice();
+  const ratio = buffer.sampleRate / targetRate;
+  const newLength = Math.round(mono.length / ratio);
+  const result = new Float32Array(newLength);
+  for(let i = 0; i < newLength; i++){
+    const srcIndex = i * ratio;
+    const i0 = Math.floor(srcIndex);
+    const i1 = Math.min(i0 + 1, mono.length - 1);
+    const frac = srcIndex - i0;
+    result[i] = mono[i0] * (1 - frac) + mono[i1] * frac;
+  }
+  return result;
+}
+
+// Come shouldListenForCommands(), ma per il percorso neurale: i due non
+// ascoltano mai insieme (si escludono a vicenda nella rispettiva condizione).
+function shouldListenForCommandsNeural(){
+  return voiceCommandEnabled && neuralSttEnabled && running && !speechBusy;
+}
+
+async function startWhisperListening(){
+  if(whisperStream) return;
+  const ready = await ensureWhisperReady();
+  if(!ready){
+    neuralSttEnabled = false;
+    updateNeuralSttBtn();
+    try{ localStorage.setItem(NEURAL_STT_STORAGE_KEY, '0'); } catch(e){ /* storage non disponibile */ }
+    pushFeedback('Riconoscimento vocale locale non disponibile su questo dispositivo/browser: resto su quello nativo.', false);
+    syncRecognition();
+    return;
+  }
+  try{
+    whisperStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch(e){
+    neuralSttEnabled = false;
+    updateNeuralSttBtn();
+    try{ localStorage.setItem(NEURAL_STT_STORAGE_KEY, '0'); } catch(err){ /* storage non disponibile */ }
+    pushFeedback('Microfono non autorizzato per il riconoscimento locale.', false);
+    syncRecognition();
+    return;
+  }
+  recordWhisperChunk();
+}
+
+function stopWhisperListening(){
+  if(whisperStream){
+    whisperStream.getTracks().forEach(t => t.stop());
+    whisperStream = null;
+  }
+}
+
+function recordWhisperChunk(){
+  if(!neuralSttEnabled || !whisperStream) return;
+  if(!shouldListenForCommandsNeural()){
+    setTimeout(recordWhisperChunk, 400);
+    return;
+  }
+  let recorder;
+  try{ recorder = new MediaRecorder(whisperStream); }
+  catch(e){ console.warn('Registrazione locale non disponibile:', e); return; }
+  const chunks = [];
+  recorder.ondataavailable = (e) => { if(e.data.size > 0) chunks.push(e.data); };
+  recorder.onstop = async () => {
+    try{
+      if(chunks.length && whisperStream){ // whisperStream potrebbe essere stato fermato nel frattempo
+        const blob = new Blob(chunks, { type: recorder.mimeType });
+        const arrayBuf = await blob.arrayBuffer();
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        const audioCtx = new AudioCtx();
+        const decoded = await audioCtx.decodeAudioData(arrayBuf);
+        audioCtx.close();
+        const pcm = resampleTo16kMono(decoded);
+        const pipelineFn = await whisperPipelinePromise;
+        if(pipelineFn && whisperStream){
+          const result = await pipelineFn(pcm, { language: 'italian', task: 'transcribe' });
+          if(result && result.text) handleVoiceCommand(result.text);
+        }
+      }
+    } catch(err){
+      console.warn('Trascrizione locale non riuscita su questo pezzo audio:', err);
+    } finally {
+      recordWhisperChunk(); // pianifica il prossimo pezzo, condizioni permettendo
+    }
+  };
+  try{ recorder.start(); }
+  catch(e){ setTimeout(recordWhisperChunk, 500); return; }
+  setTimeout(() => { if(recorder.state !== 'inactive') recorder.stop(); }, WHISPER_CHUNK_MS);
+}
+
+function updateNeuralSttBtn(){
+  const show = voiceCommandSupported && voiceCommandEnabled;
+  neuralSttBtn.style.display = show ? 'block' : 'none';
+  neuralSttHint.style.display = (show && neuralSttEnabled) ? 'block' : 'none';
+  neuralSttBtn.textContent = neuralSttEnabled
+    ? '🧠 Riconoscimento locale (sperimentale) attivo — tocca per disattivare'
+    : '🧠 Riconoscimento locale (sperimentale) disattivato — tocca per attivare';
+  neuralSttBtn.classList.toggle('primary', neuralSttEnabled);
+}
+
+neuralSttBtn.addEventListener('click', async () => {
+  neuralSttEnabled = !neuralSttEnabled;
+  updateNeuralSttBtn();
+  try{ localStorage.setItem(NEURAL_STT_STORAGE_KEY, neuralSttEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
+  syncRecognition(); // ferma quello nativo, se stava ascoltando
+  if(neuralSttEnabled){
+    pushFeedback('Preparazione riconoscimento locale in corso, il primo utilizzo può richiedere qualche secondo…', true);
+    startWhisperListening();
+  } else {
+    stopWhisperListening();
+    syncRecognition(); // eventualmente riprende quello nativo
+  }
 });
 
 // --- registro esercizi ---
@@ -3203,7 +3630,10 @@ function logSessionIfActive(){
     // rilevare pattern ricorrenti su più sessioni (vedi
     // getRecurringErrorPattern), non solo il "più frequente" della sessione
     // corrente mostrato nel riepilogo a fine allenamento.
-    errorTally: Object.keys(sessionErrorTally).length ? sessionErrorTally : undefined
+    errorTally: Object.keys(sessionErrorTally).length ? sessionErrorTally : undefined,
+    // Punteggio qualità euristico medio della sessione (vedi
+    // trackQualityFrame): assente se non è mai stato calcolabile un verdetto.
+    avgQuality: sessionAvgQuality() ?? undefined
   });
 }
 
@@ -3216,7 +3646,7 @@ function aggregateHistory(){
     const dateStr = new Date(e.ts).toLocaleDateString('it-IT');
     const mapKey = dateStr + '|' + e.key;
     if(!map.has(mapKey)){
-      map.set(mapKey, { dateStr, key: e.key, label: e.label, mode: e.mode, valid: 0, invalid: 0, seconds: 0, ts: e.ts, errorTally: {} });
+      map.set(mapKey, { dateStr, key: e.key, label: e.label, mode: e.mode, valid: 0, invalid: 0, seconds: 0, ts: e.ts, errorTally: {}, qualitySum: 0, qualityWeight: 0 });
     }
     const agg = map.get(mapKey);
     agg.valid += e.valid || 0;
@@ -3228,8 +3658,19 @@ function aggregateHistory(){
         agg.errorTally[reason] = (agg.errorTally[reason] || 0) + e.errorTally[reason];
       });
     }
+    // Media pesata sul "volume" di ciascuna sessione (ripetizioni o secondi
+    // di tenuta), non una semplice media tra sessioni: una sessione lunga
+    // pesa di più di un tocco accidentale di pochi secondi.
+    if(e.avgQuality != null){
+      const weight = (e.valid || 0) + (e.invalid || 0) + (e.seconds || 0) || 1;
+      agg.qualitySum += e.avgQuality * weight;
+      agg.qualityWeight += weight;
+    }
   });
-  return [...map.values()].sort((a, b) => b.ts - a.ts);
+  return [...map.values()].sort((a, b) => b.ts - a.ts).map(agg => {
+    agg.avgQuality = agg.qualityWeight > 0 ? Math.round(agg.qualitySum / agg.qualityWeight) : null;
+    return agg;
+  });
 }
 
 // --- record personali ---
@@ -4195,6 +4636,7 @@ function resetMetrics(){
   timerSeconds = 0; timerNum.textContent = '0:00';
   exState = {};
   resetRealtimeIssueTracking();
+  resetQualityTracking();
   activeElapsedMs = 0;
   lastActiveTick = performance.now();
   feedbackList.innerHTML = '';
@@ -4231,6 +4673,7 @@ function stopSession(){
   running = false;
   stopPairMode();
   syncRecognition(); // ferma l'ascolto dei comandi vocali insieme alla sessione
+  stopWhisperListening(); // idem per l'ascolto locale, se era in corso
   releaseWakeLock();
   stopCameraStream();
   lastVideoTime = -1;
@@ -4289,6 +4732,11 @@ function showSessionSummary(onClose){
   }
   const topError = topErrorReason();
   if(topError) addRow('Errore più frequente', topError);
+  const avgQuality = sessionAvgQuality();
+  if(avgQuality != null){
+    addRow('Qualità movimento (euristica)', avgQuality + '/100');
+    summaryText += '\nQualità movimento: ' + avgQuality + '/100 (punteggio euristico, non un\'IA)';
+  }
   const activeSeconds = Math.round(activeElapsedMs / 1000);
   if(activeSeconds > 0){
     addRow('Tempo sotto sforzo', formatRestTime(activeSeconds));
@@ -4373,9 +4821,10 @@ function renderHistory(){
     row.className = 'circuit-summary-row';
     const total = r.valid + r.invalid;
     const accuracy = total > 0 ? Math.round((r.valid / total) * 100) : null;
-    const detail = r.mode === 'reps'
+    const detail = (r.mode === 'reps'
       ? r.valid + ' valide' + (r.invalid > 0 ? ' / ' + r.invalid + ' scartate' : '') + (accuracy != null ? ' (' + accuracy + '%)' : '')
-      : formatRestTime(r.seconds) + ' in tenuta corretta';
+      : formatRestTime(r.seconds) + ' in tenuta corretta')
+      + (r.avgQuality != null ? ' · qualità ' + r.avgQuality : '');
     row.innerHTML = '<span>' + r.dateStr + ' — ' + r.label + '</span><span>' + detail + '</span>';
     historyList.appendChild(row);
   });
@@ -5217,6 +5666,7 @@ function renderLoop(){
         el.textContent = m.value;
         el.className = 'metric-value' + (m.ok === true ? ' ok' : m.ok === false ? ' bad' : '');
       });
+      trackQualityFrame(evalResult);
 
       if(ex.mode === 'timer' && evalResult.ok){
         const tickNow = performance.now();
@@ -5419,6 +5869,7 @@ startBtn.addEventListener('click', async () => {
     startPairMode();
   } else {
     syncRecognition(); // avvia l'ascolto dei comandi vocali, se attivati
+    if(neuralSttEnabled) startWhisperListening(); // idem per l'ascolto locale, se scelto al posto di quello nativo
     renderLoop();
     if(appMode === 'circuit'){
       startCircuit();
