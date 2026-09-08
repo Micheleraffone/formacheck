@@ -943,6 +943,10 @@
       Qualità movimento (euristica): <span id="qualityBadgeValue" style="font-weight:700; color:var(--ink);">—</span>
     </div>
 
+    <div id="vbtBadgeRow" style="display:none; text-align:center; padding-bottom:6px; font-size:11.5px; color:var(--ink-dim);" title="Velocità del bacino nello spazio 3D durante la ripetizione (picco, in m/s): ispirata al Velocity-Based Training usato nello sport professionistico, dove però si misura la velocità di un carico esterno con un sensore dedicato. Qui misuriamo la velocità del corpo stesso dai dati del modello di posa.">
+      Velocità esecuzione (picco): <span id="vbtBadgeValue" style="font-weight:700; color:var(--ink);">—</span>
+    </div>
+
     <div id="pairCountersRow" style="display:none; gap:10px; padding:6px 0 2px;">
       <div class="rep-counter" style="flex:1;">
         <div class="rep-num" id="pairNumA" style="color:#34d399;">0</div>
@@ -1027,6 +1031,8 @@ const timerCounter = document.getElementById('timerCounter');
 const timerNum = document.getElementById('timerNum');
 const qualityBadgeRow = document.getElementById('qualityBadgeRow');
 const qualityBadgeValue = document.getElementById('qualityBadgeValue');
+const vbtBadgeRow = document.getElementById('vbtBadgeRow');
+const vbtBadgeValue = document.getElementById('vbtBadgeValue');
 const calibOverlay = document.getElementById('calibOverlay');
 const calibChecklist = document.getElementById('calibChecklist');
 const calibBar = document.getElementById('calibBar');
@@ -1402,6 +1408,16 @@ let qLastMetricValue = null, qLastMetricTime = null;
 let qualityTimerLastSampleAt = null;
 let qualityRepScores = []; // un punteggio per ogni ripetizione (o secondo di tenuta) della sessione corrente
 
+// Velocità di esecuzione (ispirata al Velocity-Based Training): vedi
+// trackVbtFrame più sotto per i dettagli. Solo esercizi a ripetizioni,
+// solo modalità a una persona.
+let vbtLastHipPos = null, vbtLastHipTime = null;
+let vbtCurrentRepPeak = 0; // velocità di picco (m/s) osservata nella ripetizione in corso
+let vbtRepPeaks = []; // velocità di picco di ogni ripetizione completata nella sessione corrente
+let vbtBaseline = null; // media di picco delle prime VBT_BASELINE_REPS ripetizioni: riferimento per rilevare un calo
+let vbtDropStreak = 0;
+let vbtWarned = false;
+
 const VIEW_META = {
   laterale: { icon:'◐', title:'Vista laterale' },
   frontale: { icon:'◯', title:'Vista frontale' },
@@ -1478,6 +1494,7 @@ function completeRep(hadIssue, invalidMsg, validMsg){
   // senza che ciascun esercizio debba calcolarla e passarla esplicitamente.
   const repDurationMs = exState.phaseStart != null ? performance.now() - exState.phaseStart : null;
   recordQualitySample(); // chiude il punteggio qualità di questa ripetizione (valida o scartata)
+  recordVbtRep(); // idem per la velocità di picco di questa ripetizione
   if(hadIssue){
     invalidRepCount++;
     const parts = Array.isArray(invalidMsg) ? invalidMsg : [invalidMsg || 'Ripetizione non conteggiata: correggi la forma e riprova.'];
@@ -1597,6 +1614,119 @@ function updateQualityBadge(){
   qualityBadgeRow.style.display = 'block';
   qualityBadgeValue.textContent = avg + '/100';
   qualityBadgeValue.style.color = avg >= 80 ? 'var(--ok)' : avg >= 55 ? 'var(--ink)' : 'var(--bad)';
+}
+
+// --- velocità di esecuzione (ispirata al Velocity-Based Training) ---
+// Nello sport professionistico il VBT misura, con un sensore dedicato
+// (trasduttore lineare o accelerometro sul bilanciere), la velocità con cui
+// si solleva un carico esterno: un calo di velocità rep dopo rep, a parità
+// di carico, è il segnale più diretto di affaticamento reale — più
+// affidabile del "sento la fatica", ed è per questo usato per decidere
+// quando fermare una serie (autoregolazione).
+// Qui non c'è un carico esterno né un sensore dedicato: stimiamo invece la
+// velocità REALE (in m/s) del bacino nello spazio 3D, usando i world
+// landmark del modello di posa (già in metri, indipendenti dalla distanza
+// dalla fotocamera — la stessa fonte già usata altrove per kneeLateralDriftM
+// e la lunghezza del torso in modalità coppia). Non è la stessa grandezza
+// del VBT professionale (lì il carico, qui il corpo stesso), ma lo stesso
+// principio: un calo di velocità di picco rispetto all'inizio della
+// sessione, a forma invariata, è un segnale reale — non un'IA che "indovina"
+// la fatica, solo fisica su dati che il modello di posa fornisce già.
+// Solo esercizi a ripetizioni (una tenuta non ha una fase concentrica da
+// misurare) e solo modalità a una persona.
+const VBT_BASELINE_REPS = 3; // quante ripetizioni iniziali definiscono il riferimento "a fresco"
+const VBT_DROP_RATIO = 0.75; // sotto il 75% del riferimento iniziale = calo di velocità significativo
+const VBT_DROP_STREAK_TO_WARN = 2; // avvisa solo dopo ripetizioni consecutive sotto soglia, non su un singolo fotogramma rumoroso
+
+function midHip3D(){
+  if(!wlm) return null;
+  const l = wlm[23], r = wlm[24];
+  if(!l || !r) return null;
+  return { x: (l.x + r.x) / 2, y: (l.y + r.y) / 2, z: (l.z + r.z) / 2 };
+}
+
+function trackVbtFrame(){
+  if(EXERCISES[currentExercise].mode !== 'reps') return;
+  const pos = midHip3D();
+  const now = performance.now();
+  if(pos && vbtLastHipPos != null && vbtLastHipTime != null){
+    const dt = (now - vbtLastHipTime) / 1000;
+    // dt troppo grande = un buco (inquadratura persa per un attimo): non è
+    // un vero segnale di velocità, salta questo campione.
+    if(dt > 0 && dt < 0.5){
+      const dist = Math.hypot(pos.x - vbtLastHipPos.x, pos.y - vbtLastHipPos.y, pos.z - vbtLastHipPos.z);
+      const speed = dist / dt; // m/s
+      if(speed > vbtCurrentRepPeak) vbtCurrentRepPeak = speed;
+    }
+  }
+  if(pos){ vbtLastHipPos = pos; vbtLastHipTime = now; }
+}
+
+// Chiude il campionamento della ripetizione appena conclusa: registra il suo
+// picco di velocità, aggiorna il riferimento "a fresco" (le prime
+// VBT_BASELINE_REPS ripetizioni) e avvisa se la velocità è scesa in modo
+// significativo e persistente rispetto a quel riferimento.
+function recordVbtRep(){
+  const peak = vbtCurrentRepPeak;
+  vbtRepPeaks.push(peak);
+  vbtCurrentRepPeak = 0;
+  // Azzera il tracking punto-a-punto: altrimenti lo spostamento tra l'ultimo
+  // fotogramma di una ripetizione e il primo della successiva verrebbe
+  // letto come parte del movimento, falsando il picco della prossima.
+  vbtLastHipPos = null;
+  vbtLastHipTime = null;
+
+  if(vbtRepPeaks.length === VBT_BASELINE_REPS){
+    vbtBaseline = vbtRepPeaks.reduce((a, b) => a + b, 0) / VBT_BASELINE_REPS;
+  }
+  if(vbtBaseline != null && vbtRepPeaks.length > VBT_BASELINE_REPS){
+    if(peak < vbtBaseline * VBT_DROP_RATIO){
+      vbtDropStreak++;
+      if(vbtDropStreak >= VBT_DROP_STREAK_TO_WARN && !vbtWarned){
+        vbtWarned = true;
+        pushFeedback('Velocità di esecuzione in calo rispetto all\'inizio: la fatica sta rallentando il movimento.', false);
+      }
+    } else {
+      vbtDropStreak = 0;
+      vbtWarned = false; // un nuovo calo più avanti nella sessione potrà essere segnalato di nuovo
+    }
+  }
+  updateVbtBadge();
+  return peak;
+}
+
+function resetVbtTracking(){
+  vbtLastHipPos = null; vbtLastHipTime = null;
+  vbtCurrentRepPeak = 0;
+  vbtRepPeaks = [];
+  vbtBaseline = null;
+  vbtDropStreak = 0;
+  vbtWarned = false;
+  updateVbtBadge();
+}
+
+function sessionAvgVbtVelocity(){
+  if(!vbtRepPeaks.length) return null;
+  return vbtRepPeaks.reduce((a, b) => a + b, 0) / vbtRepPeaks.length;
+}
+
+// Variazione percentuale tra il picco dell'ultima ripetizione e quello della
+// prima: un modo semplice per riassumere l'andamento nel riepilogo di fine
+// sessione (negativo = rallentato, positivo = accelerato).
+function vbtVelocityTrendPct(){
+  if(vbtRepPeaks.length < 2) return null;
+  const first = vbtRepPeaks[0];
+  const last = vbtRepPeaks[vbtRepPeaks.length - 1];
+  if(first <= 0) return null;
+  return Math.round(((last - first) / first) * 100);
+}
+
+function updateVbtBadge(){
+  if(!vbtRepPeaks.length){ vbtBadgeRow.style.display = 'none'; return; }
+  vbtBadgeRow.style.display = 'block';
+  const last = vbtRepPeaks[vbtRepPeaks.length - 1];
+  vbtBadgeValue.textContent = last.toFixed(2) + ' m/s';
+  vbtBadgeValue.style.color = (vbtBaseline != null && last < vbtBaseline * VBT_DROP_RATIO) ? 'var(--bad)' : 'var(--ink)';
 }
 
 // Il motivo di scarto più frequente nella sessione corrente (per il riepilogo).
@@ -3329,7 +3459,10 @@ function logSessionIfActive(){
     errorTally: Object.keys(sessionErrorTally).length ? sessionErrorTally : undefined,
     // Punteggio qualità euristico medio della sessione (vedi
     // trackQualityFrame): assente se non è mai stato calcolabile un verdetto.
-    avgQuality: sessionAvgQuality() ?? undefined
+    avgQuality: sessionAvgQuality() ?? undefined,
+    // Velocità di esecuzione media della sessione (vedi trackVbtFrame):
+    // assente per gli esercizi a timer (una tenuta non ha rep da misurare).
+    avgVelocityMps: sessionAvgVbtVelocity() ?? undefined
   });
 }
 
@@ -3342,7 +3475,7 @@ function aggregateHistory(){
     const dateStr = new Date(e.ts).toLocaleDateString('it-IT');
     const mapKey = dateStr + '|' + e.key;
     if(!map.has(mapKey)){
-      map.set(mapKey, { dateStr, key: e.key, label: e.label, mode: e.mode, valid: 0, invalid: 0, seconds: 0, ts: e.ts, errorTally: {}, qualitySum: 0, qualityWeight: 0 });
+      map.set(mapKey, { dateStr, key: e.key, label: e.label, mode: e.mode, valid: 0, invalid: 0, seconds: 0, ts: e.ts, errorTally: {}, qualitySum: 0, qualityWeight: 0, velocitySum: 0, velocityWeight: 0 });
     }
     const agg = map.get(mapKey);
     agg.valid += e.valid || 0;
@@ -3362,9 +3495,15 @@ function aggregateHistory(){
       agg.qualitySum += e.avgQuality * weight;
       agg.qualityWeight += weight;
     }
+    if(e.avgVelocityMps != null){
+      const weight = (e.valid || 0) + (e.invalid || 0) || 1;
+      agg.velocitySum += e.avgVelocityMps * weight;
+      agg.velocityWeight += weight;
+    }
   });
   return [...map.values()].sort((a, b) => b.ts - a.ts).map(agg => {
     agg.avgQuality = agg.qualityWeight > 0 ? Math.round(agg.qualitySum / agg.qualityWeight) : null;
+    agg.avgVelocityMps = agg.velocityWeight > 0 ? (agg.velocitySum / agg.velocityWeight) : null;
     return agg;
   });
 }
@@ -4333,6 +4472,7 @@ function resetMetrics(){
   exState = {};
   resetRealtimeIssueTracking();
   resetQualityTracking();
+  resetVbtTracking();
   activeElapsedMs = 0;
   lastActiveTick = performance.now();
   feedbackList.innerHTML = '';
@@ -4432,6 +4572,17 @@ function showSessionSummary(onClose){
     addRow('Qualità movimento (euristica)', avgQuality + '/100');
     summaryText += '\nQualità movimento: ' + avgQuality + '/100 (punteggio euristico, non un\'IA)';
   }
+  const avgVelocity = sessionAvgVbtVelocity();
+  if(avgVelocity != null){
+    addRow('Velocità esecuzione (media picchi)', avgVelocity.toFixed(2) + ' m/s');
+    summaryText += '\nVelocità esecuzione: ' + avgVelocity.toFixed(2) + ' m/s di media';
+    const trendPct = vbtVelocityTrendPct();
+    if(trendPct != null){
+      const trendLabel = (trendPct >= 0 ? '+' : '') + trendPct + '% rispetto alla prima ripetizione';
+      addRow('Andamento velocità', trendLabel);
+      summaryText += ' (' + trendLabel + ')';
+    }
+  }
   const activeSeconds = Math.round(activeElapsedMs / 1000);
   if(activeSeconds > 0){
     addRow('Tempo sotto sforzo', formatRestTime(activeSeconds));
@@ -4519,7 +4670,8 @@ function renderHistory(){
     const detail = (r.mode === 'reps'
       ? r.valid + ' valide' + (r.invalid > 0 ? ' / ' + r.invalid + ' scartate' : '') + (accuracy != null ? ' (' + accuracy + '%)' : '')
       : formatRestTime(r.seconds) + ' in tenuta corretta')
-      + (r.avgQuality != null ? ' · qualità ' + r.avgQuality : '');
+      + (r.avgQuality != null ? ' · qualità ' + r.avgQuality : '')
+      + (r.avgVelocityMps != null ? ' · vel. ' + r.avgVelocityMps.toFixed(2) + ' m/s' : '');
     row.innerHTML = '<span>' + r.dateStr + ' — ' + r.label + '</span><span>' + detail + '</span>';
     historyList.appendChild(row);
   });
@@ -5434,6 +5586,7 @@ function renderLoop(){
         el.className = 'metric-value' + (m.ok === true ? ' ok' : m.ok === false ? ' bad' : '');
       });
       trackQualityFrame(evalResult);
+      trackVbtFrame();
 
       if(ex.mode === 'timer' && evalResult.ok){
         const tickNow = performance.now();
