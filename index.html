@@ -273,6 +273,18 @@
     box-shadow:var(--shadow-md);
   }
 
+  /* Senza questa regola i blocchi dentro (selettore esercizio, vista
+     richiesta, record personale, "come si esegue", muscoli coinvolti)
+     restavano semplicemente impilati uno sull'altro senza spazio, perché
+     il gap:18px di .panel si applica solo ai suoi figli diretti, e
+     #singleModeSection è lui stesso un unico figlio diretto che li
+     racchiude tutti. */
+  #singleModeSection{
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+  }
+
   .exercise-select{
     display:grid;
     grid-template-columns:1fr 1fr;
@@ -553,6 +565,12 @@
     padding:24px;
     text-align:center;
     animation:overlayIn .2s var(--ease);
+    /* La cronologia (e altri pannelli con molto contenuto, es. il report
+       settimanale) possono superare in altezza lo stage della fotocamera,
+       che ha overflow:hidden — senza scroll qui dentro, il pulsante
+       "Chiudi" in fondo diventava irraggiungibile e il pannello sembrava
+       non avere modo di chiudersi. */
+    overflow-y:auto;
   }
   @keyframes overlayIn{
     from{ opacity:0; transform:scale(0.96); }
@@ -940,6 +958,11 @@
       </div>
     </div>
 
+    <div class="controls">
+      <button class="btn primary" id="startBtn">Avvia fotocamera</button>
+      <button class="btn" id="resetBtn" disabled>Azzera</button>
+    </div>
+
     <div>
       <div class="section-label">Feedback vocale</div>
       <button class="btn" id="voiceBtn" style="width:100%;">🔈 Vocale disattivato — tocca per attivare</button>
@@ -969,10 +992,6 @@
       <div class="calib-status-note" id="backupStatusNote" style="display:none;"></div>
     </div>
 
-    <div class="controls">
-      <button class="btn primary" id="startBtn">Avvia fotocamera</button>
-      <button class="btn" id="resetBtn" disabled>Azzera</button>
-    </div>
     <button class="btn" id="recalibBtn" style="display:none;">Ricalibra posizione</button>
     <button class="btn" id="thresholdCalibBtn" style="display:none;">Taratura soglie personalizzata</button>
     <div class="calib-status-note" id="thresholdCalibStatus" style="display:none;"></div>
@@ -4852,7 +4871,7 @@ modeSelect.querySelectorAll('.ex-btn').forEach(btn => {
     modeSelect.querySelectorAll('.ex-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     appMode = btn.dataset.mode;
-    singleModeSection.style.display = (appMode === 'single' || appMode === 'pair') ? 'block' : 'none';
+    singleModeSection.style.display = (appMode === 'single' || appMode === 'pair') ? 'flex' : 'none';
     circuitBuilder.style.display = appMode === 'circuit' ? 'block' : 'none';
     pairModeNote.style.display = appMode === 'pair' ? 'block' : 'none';
     startBtn.textContent = startButtonLabel();
