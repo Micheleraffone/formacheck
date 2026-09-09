@@ -2309,6 +2309,12 @@ let livingUtterances = [];
 // listener "torno in primo piano" più sotto.
 let speechWatchdog = null;
 let forceFinishSpeech = null;
+// Timer del breve ritardo tra cancel() e la speak() vera e propria (vedi
+// pumpSpeechQueue più sotto): va tracciato a parte dal watchdog perché
+// clearSpeechQueue() deve poterlo annullare esplicitamente — altrimenti,
+// fermando la sessione proprio durante quei pochi millisecondi di attesa,
+// la frase partirebbe comunque poco dopo, a sessione già chiusa.
+let pendingSpeakTimeout = null;
 
 // Evita di accodare la stessa identica frase più volte a distanza ravvicinata:
 // alcuni avvisi vengono ripetuti a caso per più fotogrammi di seguito finché
@@ -2398,7 +2404,8 @@ function pumpSpeechQueue(){
       // identica sintomatologia che cancel() qui doveva risolvere. Un breve
       // ritardo tra le due chiamate è la mitigazione nota per questo bug.
       synth.cancel();
-      setTimeout(() => {
+      pendingSpeakTimeout = setTimeout(() => {
+        pendingSpeakTimeout = null;
         // La frase è già stata risolta nel frattempo (es. dal watchdog), o
         // l'utente ha disattivato il vocale mentre aspettavamo: non farla
         // ripartire in ritardo.
@@ -2423,6 +2430,7 @@ function clearSpeechQueue(){
   speechBusy = false;
   livingUtterances = [];
   if(speechWatchdog){ clearTimeout(speechWatchdog); speechWatchdog = null; }
+  if(pendingSpeakTimeout){ clearTimeout(pendingSpeakTimeout); pendingSpeakTimeout = null; }
   forceFinishSpeech = null;
   syncRecognition();
   try{ window.speechSynthesis.cancel(); } catch(e){ /* sintesi non disponibile */ }
@@ -5539,6 +5547,12 @@ function stopSession(){
 
   running = false;
   stopPairMode();
+  // Ferma anche una frase vocale ancora in coda o in corso: senza questa
+  // riga, a sessione già terminata (fotocamera spenta, schermata tornata
+  // inattiva) si poteva comunque sentire un ultimo avviso sull'esercizio
+  // appena interrotto — incoerente con i sottotitoli, che invece con
+  // clearCaptionQueue() più sotto spariscono subito.
+  clearSpeechQueue();
   syncRecognition(); // ferma l'ascolto dei comandi vocali insieme alla sessione
   releaseWakeLock();
   stopCameraStream();
