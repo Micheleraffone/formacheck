@@ -1143,6 +1143,9 @@
     </div>
 
     <div class="circuit-builder" id="circuitBuilder" style="display:none;">
+      <div class="section-label">📚 Corsi pronti all'uso</div>
+      <div class="calib-hint" style="margin:-4px 0 8px; font-size:12px;">Come le lezioni in palestra: playlist fisse già pensate, un tocco su "Carica" e sono pronte nel circuito qui sotto.</div>
+      <div id="builtinCoursesList" style="display:flex; flex-direction:column; gap:6px; margin-bottom:14px;"></div>
       <div class="section-label">Programmi salvati</div>
       <div id="savedProgramsList" style="display:flex; flex-direction:column; gap:6px; margin-bottom:14px;"></div>
       <div class="section-label">Scegli gli esercizi del circuito, in ordine</div>
@@ -1402,6 +1405,7 @@ const pairCalibBtnA = document.getElementById('pairCalibBtnA');
 const pairCalibBtnB = document.getElementById('pairCalibBtnB');
 const pairCalibStatus = document.getElementById('pairCalibStatus');
 const circuitListEl = document.getElementById('circuitList');
+const builtinCoursesList = document.getElementById('builtinCoursesList');
 const savedProgramsList = document.getElementById('savedProgramsList');
 const saveProgramBtn = document.getElementById('saveProgramBtn');
 const restPresetButtons = document.querySelectorAll('.restpreset-btn');
@@ -5515,6 +5519,70 @@ function collectCircuitConfig(){
   });
   return list;
 }
+
+// --- corsi pronti all'uso ---
+// A differenza di un "programma" (che l'utente compone e salva da sé), un
+// corso è una playlist fissa e curata, come le classi che si trovano in
+// palestra (Total Body, Tabata, Core Express...): non si modifica né si
+// elimina, si carica e basta. Riusa applyProgramToBuilder così com'è —
+// la funzione lavora su {name, steps, rest} e non le importa se l'oggetto
+// arriva da un programma salvato o da questa libreria fissa.
+const BUILTIN_COURSES = [
+  { id: 'total-body', icon: '🏋️', name: 'Total Body', tagline: 'Il classico: tutto il corpo in un solo giro.', rest: 45, steps: [
+    { key: 'squat', target: 12 }, { key: 'pushup', target: 10 },
+    { key: 'mountainclimber', target: 20 }, { key: 'plank', target: 30 }
+  ] },
+  { id: 'gambe-glutei', icon: '🦵', name: 'Gambe e Glutei', tagline: 'Squat, affondi e isometria per le gambe.', rest: 45, steps: [
+    { key: 'squat', target: 15 }, { key: 'lunge', target: 12 },
+    { key: 'glutebridge', target: 15 }, { key: 'wallsit', target: 30 }
+  ] },
+  { id: 'core-express', icon: '🔥', name: 'Core Express', tagline: 'Addominali e obliqui, ritmo serrato.', rest: 30, steps: [
+    { key: 'crunch', target: 15 }, { key: 'bicyclecrunch', target: 16 },
+    { key: 'russiantwist', target: 20 }, { key: 'plank', target: 30 }
+  ] },
+  { id: 'cardio-hiit', icon: '⚡', name: 'Cardio HIIT', tagline: "Battito su, poco riposo tra un giro e l'altro.", rest: 30, steps: [
+    { key: 'jumpingjack', target: 30 }, { key: 'highknees', target: 30 },
+    { key: 'burpee', target: 10 }, { key: 'mountainclimber', target: 20 }
+  ] },
+  { id: 'braccia-petto', icon: '💪', name: 'Braccia e Petto', tagline: 'Push-up, dip e plank per la parte alta.', rest: 45, steps: [
+    { key: 'pushup', target: 12 }, { key: 'chairdip', target: 10 },
+    { key: 'plank', target: 30 }, { key: 'sideplank', target: 20 }
+  ] },
+  { id: 'sfida-total-body', icon: '🏆', name: 'Sfida Total Body', tagline: 'Il più impegnativo: intensità alta, riposo breve.', rest: 30, steps: [
+    { key: 'burpee', target: 12 }, { key: 'squat', target: 15 },
+    { key: 'pushup', target: 12 }, { key: 'mountainclimber', target: 24 },
+    { key: 'highknees', target: 30 }
+  ] }
+];
+
+function renderBuiltinCourses(){
+  builtinCoursesList.innerHTML = '';
+  BUILTIN_COURSES.forEach(course => {
+    const row = document.createElement('div');
+    row.className = 'circuit-row';
+    row.style.justifyContent = 'space-between';
+    const stepsNote = course.steps.map(s => EXERCISES[s.key].label).join(', ');
+    row.innerHTML =
+      '<span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;">' +
+        '<strong>' + course.icon + ' ' + course.name + '</strong><br>' +
+        '<span style="color:var(--ink-dim); font-size:11px;">' + course.tagline + '<br>' + stepsNote + '</span>' +
+      '</span>' +
+      '<span style="display:flex; gap:6px; flex-shrink:0;">' +
+        '<button class="calib-skip" data-action="load" data-id="' + course.id + '">Carica</button>' +
+      '</span>';
+    builtinCoursesList.appendChild(row);
+  });
+}
+
+builtinCoursesList.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-action="load"]');
+  if(!btn) return;
+  const course = BUILTIN_COURSES.find(c => c.id === btn.dataset.id);
+  if(!course) return;
+  applyProgramToBuilder(course);
+});
+
+renderBuiltinCourses();
 
 // --- programmi di allenamento salvati ---
 // Un circuito composto al volo si perde alla chiusura della pagina; un
