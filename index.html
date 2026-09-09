@@ -6373,46 +6373,92 @@ function drawReferenceOverlay(lm, refPose){
 function drawSkeleton(lm, ok, personStyle){
   const w = canvas.width, h = canvas.height;
   const color = personStyle ? (ok ? personStyle.ok : personStyle.bad) : (ok ? '#34d399' : '#f87171');
+
+  // Scala tratto, pallini e badge in proporzione alla taglia della persona
+  // nell'inquadratura (distanza spalla-anca in pixel), non a un valore
+  // fisso: così lo scheletro resta ben proporzionato sia vicino che
+  // lontano dalla fotocamera, e su qualunque risoluzione video — non solo
+  // più bello, ma anche più leggibile a colpo d'occhio a ogni distanza.
+  const shoulder = lm[11] || lm[12], hip = lm[23] || lm[24];
+  let scale = 1;
+  if(shoulder && hip){
+    const torsoPx = Math.hypot((shoulder.x - hip.x) * w, (shoulder.y - hip.y) * h);
+    scale = Math.min(1.6, Math.max(0.6, torsoPx / 220));
+  }
+  const jointR = 5 * scale;
+
+  // Rispetto alla versione precedente, aggiunge mani e piedi completi
+  // (prima si fermava a polso/caviglia): uno scheletro più professionale,
+  // più vicino a quello di un'analisi del movimento vera.
   const connections = [
     [11,12],[11,23],[12,24],[23,24],
     [11,13],[13,15],[12,14],[14,16],
     [23,25],[25,27],[24,26],[26,28],
-    [27,31],[28,32]
+    [27,29],[27,31],[29,31],[28,30],[28,32],[30,32],
+    [15,17],[15,19],[15,21],[16,18],[16,20],[16,22]
   ];
+
+  ctx.save();
+  // Estremità arrotondate invece del taglio netto di default: alle
+  // giunzioni tra due segmenti (es. spalla-gomito-polso) lo scheletro non
+  // mostra più angoli vivi ma una linea continua e morbida.
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  // Un lieve bagliore dello stesso colore, invece del tratto piatto: dà
+  // allo scheletro un aspetto da overlay AR curato invece che da wireframe
+  // di debug, e aiuta la leggibilità su sfondi chiari o molto testurizzati.
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 8 * scale;
+  ctx.strokeStyle = color;
   // Il colore da solo (verde/rosso) non basta per chi ha il daltonismo: lo
   // scheletro scorretto è anche tratteggiato e leggermente più spesso, e
   // porta un badge con un simbolo (✓/✗) accanto alla testa — riconoscibile
   // a colpo d'occhio indipendentemente dal colore percepito.
-  ctx.lineWidth = ok ? 3 : 4;
-  ctx.strokeStyle = color;
-  ctx.setLineDash(ok ? [] : [10, 6]);
+  ctx.setLineDash(ok ? [] : [10 * scale, 6 * scale]);
   connections.forEach(([a,b]) => {
     const pa = lm[a], pb = lm[b];
     if(!pa || !pb) return;
+    // Un'articolazione poco visibile (fuori campo, coperta) dà una stima di
+    // posizione meno affidabile: farla apparire più trasparente comunica
+    // quella minore certezza, invece di disegnarla sempre con la stessa
+    // sicurezza visiva di una lettura affidabile.
+    const vis = Math.min(pa.visibility ?? 1, pb.visibility ?? 1);
+    ctx.globalAlpha = Math.max(0.25, Math.min(1, vis));
+    ctx.lineWidth = (ok ? 3 : 4) * scale;
     ctx.beginPath();
     ctx.moveTo(pa.x*w, pa.y*h);
     ctx.lineTo(pb.x*w, pb.y*h);
     ctx.stroke();
   });
   ctx.setLineDash([]); // i pallini delle articolazioni restano sempre pieni
-  ctx.fillStyle = color;
+  ctx.shadowBlur = 0; // i pallini restano nitidi, il bagliore è solo sul tratto
   [11,12,13,14,15,16,23,24,25,26,27,28].forEach(i => {
     const p = lm[i];
     if(!p) return;
+    ctx.globalAlpha = Math.max(0.25, Math.min(1, p.visibility ?? 1));
+    // Alone scuro dietro il pallino colorato: resta leggibile anche su
+    // pelle chiara o abbigliamento dello stesso colore del pallino.
     ctx.beginPath();
-    ctx.arc(p.x*w, p.y*h, 5, 0, Math.PI*2);
+    ctx.arc(p.x*w, p.y*h, jointR + 2, 0, Math.PI*2);
+    ctx.fillStyle = '#0e1420';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(p.x*w, p.y*h, jointR, 0, Math.PI*2);
+    ctx.fillStyle = color;
     ctx.fill();
   });
+  ctx.globalAlpha = 1;
 
   const nose = lm[0];
   if(nose){
-    const cx = nose.x*w, cy = nose.y*h - 30;
+    const badgeR = 12 * scale;
+    const cx = nose.x*w, cy = nose.y*h - 30*scale;
     ctx.beginPath();
-    ctx.arc(cx, cy, 12, 0, Math.PI*2);
+    ctx.arc(cx, cy, badgeR, 0, Math.PI*2);
     ctx.fillStyle = color;
     ctx.fill();
     ctx.fillStyle = '#0e1420';
-    ctx.font = 'bold 14px sans-serif';
+    ctx.font = 'bold ' + Math.round(14*scale) + 'px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(ok ? '✓' : '✗', cx, cy + 1);
@@ -6422,19 +6468,20 @@ function drawSkeleton(lm, ok, personStyle){
     // per il daltonismo come sopra, qui deve anche distinguere due scheletri
     // contemporaneamente, non solo due stati corretto/scorretto).
     if(personStyle && personStyle.label){
-      const lx = cx - 24;
+      const lx = cx - 24*scale;
       ctx.beginPath();
-      ctx.arc(lx, cy, 10, 0, Math.PI*2);
+      ctx.arc(lx, cy, 10*scale, 0, Math.PI*2);
       ctx.fillStyle = '#0e1420';
       ctx.fill();
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.fillStyle = color;
-      ctx.font = 'bold 12px sans-serif';
+      ctx.font = 'bold ' + Math.round(12*scale) + 'px sans-serif';
       ctx.fillText(personStyle.label, lx, cy + 1);
     }
   }
+  ctx.restore();
 }
 
 function setStatus(ok, msg){
