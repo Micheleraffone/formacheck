@@ -797,6 +797,16 @@
   .history-chart-quality-chip{ width:10px; height:10px; border-radius:3px; background:var(--line); }
   .history-chart-note{ font-size:11.5px; color:var(--ink-dim); text-align:center; }
 
+  .symmetry-panel{ display:flex; flex-direction:column; gap:6px; }
+  .symmetry-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    background:var(--panel-3); border:1px solid var(--line); border-radius:var(--radius-sm);
+    padding:9px 11px;
+  }
+  .symmetry-row-name{ color:var(--ink); font-weight:600; font-size:12.5px; }
+  .symmetry-row-detail{ color:var(--ink-dim); font-size:11px; }
+  .symmetry-ratio{ font-family:'Manrope', sans-serif; font-weight:700; font-size:16px; flex-shrink:0; }
+
   /* Isola il report settimanale quando si stampa (o si salva come PDF dal
      dialogo di stampa del browser): nasconde tutto il resto della pagina,
      forzando colori chiari su sfondo bianco indipendentemente dal tema
@@ -954,6 +964,12 @@
       <div class="history-chart-quality-row" id="historyChartQualityRow" aria-hidden="true"></div>
       <div class="history-chart-note" id="historyChartInsight" style="width:100%; max-width:340px;"></div>
       <div class="history-chart-note" id="historyChartRecord" style="width:100%; max-width:340px;"></div>
+
+      <div style="width:100%; max-width:340px; display:flex; flex-direction:column; gap:6px; padding-top:10px; margin-top:2px; border-top:1px solid var(--line);">
+        <div class="section-label" title="Confronta la profondità/ampiezza raggiunta dal lato sinistro e destro del corpo — lo stesso tipo di analisi (Limb Symmetry Index) usato nella riabilitazione sportiva dopo un infortunio. Richiede un esercizio dove entrambi i lati sono confrontabili (vista frontale, o gambe alternate) e almeno 3 ripetizioni valide per lato in una sessione.">🦵 Simmetria sinistra/destra</div>
+        <div id="symmetryPanel" class="symmetry-panel"></div>
+      </div>
+
       <div id="historyList" style="width:100%; max-width:340px; max-height:36vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
       <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
         <button class="calib-skip" id="weeklyReportBtn">📄 Report settimanale</button>
@@ -1156,6 +1172,8 @@
             <button class="cam-btn restpreset-btn" data-rest="90">90s</button>
           </div>
         </div>
+        <button class="btn" id="ghostBtn" style="width:100%;" title="Sovrappone allo scheletro in tempo reale, semi-trasparente e tratteggiato, la sagoma della tua migliore ripetizione storica per questo esercizio (quella con il punteggio qualità più alto) — un confronto visivo diretto con il tuo meglio, non con un modello generico. Si aggiorna da sola appena ne fai una ancora migliore.">👻 Scheletro fantasma disattivato — tocca per attivare</button>
+        <div class="calib-status-note" id="ghostHint" style="display:none;">Confronta in tempo reale la tua ripetizione con la tua migliore ripetizione storica per questo esercizio (in viola, tratteggiata). Disponibile solo per gli esercizi a ripetizioni, dopo che ne hai completata almeno una valida — finché non c'è ancora un dato, semplicemente non appare nulla.</div>
       </div>
     </div>
 
@@ -1313,6 +1331,8 @@ const thresholdCalibStatus = document.getElementById('thresholdCalibStatus');
 const recalibSuggestBadge = document.getElementById('recalibSuggestBadge');
 const recalibSuggestBtn = document.getElementById('recalibSuggestBtn');
 const refPoseBtn = document.getElementById('refPoseBtn');
+const ghostBtn = document.getElementById('ghostBtn');
+const ghostHint = document.getElementById('ghostHint');
 const thresholdCalibOverlay = document.getElementById('thresholdCalibOverlay');
 const thresholdCalibStepLabel = document.getElementById('thresholdCalibStepLabel');
 const thresholdCalibPrompt = document.getElementById('thresholdCalibPrompt');
@@ -1406,6 +1426,7 @@ const historyChartInsight = document.getElementById('historyChartInsight');
 const historyChartRecord = document.getElementById('historyChartRecord');
 const historyPeriodTabs = document.getElementById('historyPeriodTabs');
 const historyExerciseFilter = document.getElementById('historyExerciseFilter');
+const symmetryPanel = document.getElementById('symmetryPanel');
 const historyList = document.getElementById('historyList');
 const weeklyReportBtn = document.getElementById('weeklyReportBtn');
 const weeklyReportOverlay = document.getElementById('weeklyReportOverlay');
@@ -1654,6 +1675,14 @@ let currentExercise = 'squat';
 let poseLandmarker = null;
 let running = false;
 let lastVideoTime = -1;
+// Landmark dell'ultimo fotogramma elaborato in modalità a una persona:
+// completeRep() gira DENTRO ex.evaluate(lm), quindi non ha lm nel proprio
+// scope — leggerlo da qui invece di cambiare la firma di tutti e 16 gli
+// evaluate()/completeRep() delle schede esercizio. Aggiornata subito prima
+// di ogni chiamata a ex.evaluate(lm), quindi è sempre quella del
+// fotogramma corrente quando completeRep() la legge (JS è a singolo
+// thread: nessuna corsa critica).
+let lastFrameLm = null;
 
 // Wake Lock: impedisce allo schermo di spegnersi durante l'allenamento — se
 // il telefono resta appoggiato senza essere toccato per un po' (tipico:
@@ -1836,6 +1865,45 @@ let qCleanFrames = 0, qDirtyFrames = 0, qAllFrames = 0, qJerkEvents = 0;
 let qLastMetricValue = null, qLastMetricTime = null;
 let qualityTimerLastSampleAt = null;
 let qualityRepScores = []; // un punteggio per ogni ripetizione (o secondo di tenuta) della sessione corrente
+
+// --- Analisi asimmetria sinistra/destra ---------------------------------
+// Alcuni esercizi (quelli dove i due lati del corpo sono confrontabili:
+// simultaneamente da una vista frontale, o alternati tra una ripetizione e
+// l'altra) calcolano già, al loro interno, una media per lato per un avviso
+// dal vivo — vedi trackLungeSymmetry, trackMountainClimberSymmetry, e i
+// controlli analoghi dentro highknees/russiantwist/jumpingjack. Questo
+// array raccoglie GLI STESSI valori già calcolati lì, ma a livello di
+// sessione intera (sopravvive al reset di exState tra una serie e l'altra
+// dello stesso esercizio, cosa che i contatori locali lì non fanno), per
+// poterli salvare in cronologia a fine sessione invece di lasciarli
+// scomparire dopo il solo avviso dal vivo.
+let symmetrySamples = []; // { side: 'left'|'right', value } per ogni ripetizione valida, negli esercizi supportati
+function recordSymmetrySample(side, value){
+  symmetrySamples.push({ side, value });
+}
+function resetSymmetryTracking(){
+  symmetrySamples = [];
+}
+const SYMMETRY_MIN_REPS_PER_SIDE = 3; // stessa soglia già usata dagli avvisi dal vivo per lato
+// Risultato della sessione corrente per l'esercizio attivo, o null se non
+// ci sono abbastanza ripetizioni valide su entrambi i lati per dire
+// qualcosa di sensato (meglio tacere che un confronto rumoroso).
+function sessionSymmetryResult(){
+  const left = symmetrySamples.filter(s => s.side === 'left');
+  const right = symmetrySamples.filter(s => s.side === 'right');
+  if(left.length < SYMMETRY_MIN_REPS_PER_SIDE || right.length < SYMMETRY_MIN_REPS_PER_SIDE) return null;
+  const leftAvg = left.reduce((sum, s) => sum + s.value, 0) / left.length;
+  const rightAvg = right.reduce((sum, s) => sum + s.value, 0) / right.length;
+  const stronger = Math.max(leftAvg, rightAvg);
+  const weaker = Math.min(leftAvg, rightAvg);
+  if(stronger <= 0) return null;
+  return {
+    ratio: Math.round((weaker / stronger) * 100), // 100 = perfettamente simmetrico, più basso = più asimmetrico
+    weakerSide: leftAvg < rightAvg ? 'sinistra' : 'destra',
+    leftReps: left.length,
+    rightReps: right.length
+  };
+}
 
 // Velocità di esecuzione (ispirata al Velocity-Based Training): vedi
 // trackVbtFrame più sotto per i dettagli. Solo esercizi a ripetizioni,
@@ -2078,7 +2146,7 @@ function completeRep(hadIssue, invalidMsg, validMsg){
   // qui è già disponibile la durata dell'intera ripetizione appena conclusa,
   // senza che ciascun esercizio debba calcolarla e passarla esplicitamente.
   const repDurationMs = exState.phaseStart != null ? performance.now() - exState.phaseStart : null;
-  recordQualitySample(); // chiude il punteggio qualità di questa ripetizione (valida o scartata)
+  const repScore = recordQualitySample(); // chiude il punteggio qualità di questa ripetizione (valida o scartata)
   recordVbtRep(); // idem per la velocità di picco di questa ripetizione
   recordTempoRep(); // idem per la suddivisione discesa/risalita
   if(hadIssue){
@@ -2090,8 +2158,52 @@ function completeRep(hadIssue, invalidMsg, validMsg){
   } else {
     incrementRep();
     checkRepTempo(repDurationMs);
+    if(repScore != null) maybeCaptureGhostRep(repScore);
     if(validMsg) pushFeedback(validMsg, true);
   }
+}
+
+// --- scheletro fantasma della migliore ripetizione storica -------------
+// A ogni ripetizione VALIDA, se il suo punteggio qualità supera quello
+// già salvato per questo esercizio, ne memorizza la posa (nello stesso
+// formato normalizzato — relativo al centro anche e alla scala del busto —
+// già usato per la postura di riferimento calibrata, vedi
+// normalizePoseForOverlay), così può essere ridisegnata più avanti
+// sovrapposta allo scheletro live, qualunque sia la distanza dalla
+// fotocamera in quel momento. Solo esercizi a ripetizioni, solo modalità a
+// una persona (completeRep esce prima per la modalità a coppie).
+const GHOST_STORAGE_KEY = 'formacheck_ghost_v1';
+// Cache in memoria: getGhostPoseFor viene chiamata a ogni fotogramma
+// mentre lo scheletro fantasma è attivo (fino a 60 volte al secondo), e
+// rileggere e ri-parsare localStorage così spesso sarebbe uno spreco —
+// invalidata solo quando saveGhostStore scrive un nuovo dato.
+let ghostStoreCache = null;
+function loadGhostStore(){
+  if(ghostStoreCache) return ghostStoreCache;
+  try{
+    const raw = localStorage.getItem(GHOST_STORAGE_KEY);
+    ghostStoreCache = raw ? JSON.parse(raw) : {};
+  } catch(e){ ghostStoreCache = {}; }
+  return ghostStoreCache;
+}
+function saveGhostStore(store){
+  ghostStoreCache = store;
+  try{ localStorage.setItem(GHOST_STORAGE_KEY, JSON.stringify(store)); } catch(e){ /* storage non disponibile */ }
+}
+function getGhostPoseFor(exerciseKey){
+  const entry = loadGhostStore()[exerciseKey];
+  return entry ? entry.pose : null;
+}
+function maybeCaptureGhostRep(score){
+  const ex = EXERCISES[currentExercise];
+  if(!ex || ex.mode !== 'reps' || !lastFrameLm) return;
+  const store = loadGhostStore();
+  const existing = store[currentExercise];
+  if(existing && existing.score >= score) return; // già salvata una ripetizione uguale o migliore
+  const pose = normalizePoseForOverlay(lastFrameLm);
+  if(!pose) return;
+  store[currentExercise] = { pose, score, capturedAt: Date.now() };
+  saveGhostStore(store);
 }
 
 // Rileva quando l'utente accelera bruscamente rispetto al proprio ritmo
@@ -3009,6 +3121,10 @@ function trackLungeSymmetry(isLeft, minKnee){
   }
   if(isLeft){ exState.lsiLeftSum += minKnee; exState.lsiLeftCount++; }
   else { exState.lsiRightSum += minKnee; exState.lsiRightCount++; }
+  // Stessa "profondità" (angolo capovolto: più alto = più profondo = meglio)
+  // già usata qui sotto per il confronto in-sessione, ma a livello di
+  // sessione intera — vedi la nota su symmetrySamples più in alto nel file.
+  recordSymmetrySample(isLeft ? 'left' : 'right', 180 - minKnee);
 
   if(exState.lsiWarned) return;
   if(exState.lsiLeftCount < LUNGE_LSI_MIN_REPS_PER_SIDE || exState.lsiRightCount < LUNGE_LSI_MIN_REPS_PER_SIDE) return;
@@ -3046,6 +3162,7 @@ function trackMountainClimberSymmetry(isLeft, minKnee){
   }
   if(isLeft){ exState.lsiLeftSum += minKnee; exState.lsiLeftCount++; }
   else { exState.lsiRightSum += minKnee; exState.lsiRightCount++; }
+  recordSymmetrySample(isLeft ? 'left' : 'right', 180 - minKnee);
 
   if(exState.lsiWarned) return;
   if(exState.lsiLeftCount < MC_LSI_MIN_REPS_PER_SIDE || exState.lsiRightCount < MC_LSI_MIN_REPS_PER_SIDE) return;
@@ -3562,13 +3679,25 @@ const EXERCISES = {
         exState.repHadIssue = false;
         exState.issueSince = null;
         exState.phaseStart = performance.now();
+        // Ampiezza massima raggiunta da ciascun braccio in questa
+        // ripetizione, per il confronto sinistra/destra a fine ripetizione
+        // (vedi symmetrySamples più in alto nel file).
+        exState.jjPeakLeft = leftArmRaise;
+        exState.jjPeakRight = rightArmRaise;
       } else if(exState.phase === 'open'){
+        if(leftArmRaise > exState.jjPeakLeft) exState.jjPeakLeft = leftArmRaise;
+        if(rightArmRaise > exState.jjPeakRight) exState.jjPeakRight = rightArmRaise;
         trackFormIssue(issues.length > 0, issues[0]);
         if(closed){
           exState.phase = 'closed';
           const tooFast = repTooFast(exState.phaseStart);
           const invalidParts = tooFast ? 'Movimento troppo rapido o instabile: ripetizione non conteggiata.' : rejectRepSequence(exState.lastIssueMsg);
-          completeRep(exState.repHadIssue || tooFast, invalidParts, 'Movimento ampio e sincronizzato.');
+          const hadIssue = exState.repHadIssue || tooFast;
+          completeRep(hadIssue, invalidParts, 'Movimento ampio e sincronizzato.');
+          if(!hadIssue){
+            recordSymmetrySample('left', exState.jjPeakLeft);
+            recordSymmetrySample('right', exState.jjPeakRight);
+          }
           exState.repHadIssue = false;
           exState.issueSince = null;
         }
@@ -3866,8 +3995,8 @@ const EXERCISES = {
       if(Math.abs(offset) > exState.peakOffset) exState.peakOffset = Math.abs(offset);
       if((side === 'destra' || side === 'sinistra') && side !== exState.last){
         const finishedSide = exState.last; // il lato appena lasciato è quello di cui registriamo l'ampiezza raggiunta
-        if(finishedSide === 'sinistra'){ exState.leftSum += exState.peakOffset; exState.leftCount++; }
-        else if(finishedSide === 'destra'){ exState.rightSum += exState.peakOffset; exState.rightCount++; }
+        if(finishedSide === 'sinistra'){ exState.leftSum += exState.peakOffset; exState.leftCount++; recordSymmetrySample('left', exState.peakOffset); }
+        else if(finishedSide === 'destra'){ exState.rightSum += exState.peakOffset; exState.rightCount++; recordSymmetrySample('right', exState.peakOffset); }
         exState.peakOffset = Math.abs(offset);
         exState.last = side;
         const tooFast = repTooFast(exState.lastSwitchAt);
@@ -3976,8 +4105,8 @@ const EXERCISES = {
         if(raised > exState.peakRaise){ exState.peakRaise = raised; exState.peakSide = raisedSide; }
         if(!kneeHigh){
           exState.phase = 'down';
-          if(exState.peakSide === 'sinistro'){ exState.leftSum += exState.peakRaise; exState.leftCount++; }
-          else { exState.rightSum += exState.peakRaise; exState.rightCount++; }
+          if(exState.peakSide === 'sinistro'){ exState.leftSum += exState.peakRaise; exState.leftCount++; recordSymmetrySample('left', exState.peakRaise); }
+          else { exState.rightSum += exState.peakRaise; exState.rightCount++; recordSymmetrySample('right', exState.peakRaise); }
           completeRep(repTooFast(exState.phaseStart), 'Movimento troppo rapido o instabile: ripetizione non conteggiata.', 'Buon ritmo, ginocchio in alto.');
 
           // Confronto solo dopo almeno 3 sollevamenti per lato, e non più
@@ -4292,7 +4421,12 @@ function logSessionIfActive(){
     // Session-RPE (metodo di Foster): assente se l'utente ha chiuso il
     // riepilogo senza valutare lo sforzo percepito.
     sessionRPE: pendingSessionRPE ?? undefined,
-    sessionLoad: computeSessionLoad() ?? undefined
+    sessionLoad: computeSessionLoad() ?? undefined,
+    // Analisi asimmetria sinistra/destra (vedi symmetrySamples più in
+    // alto): assente per gli esercizi dove i due lati non sono confrontabili
+    // (la maggior parte, a vista laterale — un solo lato è mai visibile) o
+    // quando non ci sono abbastanza ripetizioni valide su entrambi i lati.
+    asymmetry: sessionSymmetryResult() ?? undefined
   });
 }
 
@@ -5072,6 +5206,25 @@ refPoseBtn.addEventListener('click', () => {
   refPoseEnabled = !refPoseEnabled;
   updateRefPoseBtn();
   try{ localStorage.setItem(REF_POSE_ENABLED_KEY, refPoseEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
+});
+
+const GHOST_ENABLED_KEY = 'formacheck_ghost_enabled_v1';
+let ghostEnabled = false;
+try{ ghostEnabled = localStorage.getItem(GHOST_ENABLED_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
+
+function updateGhostBtn(){
+  ghostBtn.textContent = ghostEnabled
+    ? '👻 Scheletro fantasma attivo — tocca per disattivare'
+    : '👻 Scheletro fantasma disattivato — tocca per attivare';
+  ghostBtn.classList.toggle('primary', ghostEnabled);
+  ghostHint.style.display = ghostEnabled ? 'block' : 'none';
+}
+updateGhostBtn();
+
+ghostBtn.addEventListener('click', () => {
+  ghostEnabled = !ghostEnabled;
+  updateGhostBtn();
+  try{ localStorage.setItem(GHOST_ENABLED_KEY, ghostEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
 });
 
 // --- timer di riposo ---
@@ -6151,6 +6304,7 @@ function resetMetrics(){
   resetRealtimeIssueTracking();
   resetQualityTracking();
   resetVbtTracking();
+  resetSymmetryTracking();
   resetTempoTracking();
   apreGoalOverride = null;
   apreSetQualityStart = 0;
@@ -6557,10 +6711,61 @@ function renderHistoryChart(){
   }
 }
 
+// Esercizi dove i due lati del corpo sono davvero confrontabili nello
+// stesso momento (vista frontale) o tra una ripetizione e l'altra (gambe
+// alternate): la maggior parte degli esercizi di questa app usa una vista
+// laterale, dove un solo lato è mai visibile alla fotocamera — lì
+// un'asimmetria "misurata" sarebbe solo rumore spacciato per dato.
+const ASYMMETRY_EXERCISES = ['jumpingjack', 'highknees', 'russiantwist', 'lunge', 'mountainclimber'];
+
+function getAsymmetryHistoryFor(exerciseKey){
+  return loadHistory()
+    .filter(e => e.key === exerciseKey && e.asymmetry)
+    .sort((a, b) => a.ts - b.ts);
+}
+
+function renderSymmetryPanel(){
+  symmetryPanel.innerHTML = '';
+  const withData = ASYMMETRY_EXERCISES
+    .map(key => ({ key, entries: getAsymmetryHistoryFor(key) }))
+    .filter(x => x.entries.length > 0);
+
+  if(withData.length === 0){
+    const empty = document.createElement('div');
+    empty.className = 'calib-hint';
+    empty.textContent = 'Ancora nessun dato: disponibile dopo una sessione di Jumping jack, Ginocchia alte, Russian twist, Affondo o Mountain climber con almeno 3 ripetizioni valide per lato.';
+    symmetryPanel.appendChild(empty);
+    return;
+  }
+
+  withData.forEach(({ key, entries }) => {
+    const latest = entries[entries.length - 1];
+    const previous = entries.length >= 2 ? entries[entries.length - 2] : null;
+    const ratio = latest.asymmetry.ratio;
+    const color = ratio >= 90 ? 'var(--ok)' : ratio >= 80 ? 'var(--warn)' : 'var(--bad)';
+    let trendText = '';
+    if(previous){
+      const diff = ratio - previous.asymmetry.ratio;
+      trendText = diff >= 3 ? ' · 📈 in miglioramento' : diff <= -3 ? ' · 📉 in peggioramento' : ' · ➡️ stabile';
+    }
+    const row = document.createElement('div');
+    row.className = 'symmetry-row';
+    row.innerHTML =
+      '<div style="display:flex; flex-direction:column; gap:3px; flex:1; min-width:0;">' +
+        '<span class="symmetry-row-name">' + EXERCISES[key].label + '</span>' +
+        '<span class="symmetry-row-detail">Lato più debole: ' + latest.asymmetry.weakerSide + trendText + '</span>' +
+      '</div>' +
+      '<span class="symmetry-ratio" style="color:' + color + ';">' + ratio + '%</span>';
+    row.title = ratio + '% di simmetria (100% = perfettamente simmetrico) — ' + latest.asymmetry.leftReps + ' ripetizioni valide a sinistra, ' + latest.asymmetry.rightReps + ' a destra, nell\'ultima sessione registrata.';
+    symmetryPanel.appendChild(row);
+  });
+}
+
 function renderHistory(){
   renderGoalPanel();
   populateHistoryExerciseFilter();
   renderHistoryChart();
+  renderSymmetryPanel();
   const rows = aggregateHistory();
   historyList.innerHTML = '';
   if(rows.length === 0){
@@ -6897,7 +7102,7 @@ const BACKUP_KEYS = [
   THEME_STORAGE_KEY, CAPTIONS_STORAGE_KEY, VOICE_COMMAND_STORAGE_KEY,
   THRESH_STORAGE_KEY, HISTORY_STORAGE_KEY, GOAL_STORAGE_KEY,
   WEIGHT_STORAGE_KEY, REF_POSE_ENABLED_KEY, PROGRAMS_STORAGE_KEY,
-  REMINDER_STORAGE_KEY
+  REMINDER_STORAGE_KEY, GHOST_STORAGE_KEY, GHOST_ENABLED_KEY
 ];
 
 function showBackupStatus(msg, ok){
@@ -7168,13 +7373,16 @@ function normalizePoseForOverlay(lm){
   return out;
 }
 
-// Disegna la posa di riferimento come scheletro "fantasma" tratteggiato,
+// Disegna una posa registrata come scheletro "fantasma" tratteggiato,
 // riproiettato sul centro anche e la scala del busto CORRENTI (non quelli
-// della calibrazione): così appare nella stessa posizione/scala relativa
-// della persona inquadrata ora, qualunque sia la sua distanza dalla
-// fotocamera. Va disegnato prima dello scheletro live, che deve restare
-// sempre il più leggibile dei due.
-function drawReferenceOverlay(lm, refPose){
+// del momento in cui è stata registrata): così appare nella stessa
+// posizione/scala relativa della persona inquadrata ora, qualunque sia la
+// sua distanza dalla fotocamera. Va disegnato prima dello scheletro live,
+// che deve restare sempre il più leggibile dei due. Usata sia per la
+// postura di riferimento calibrata (refPoseEnabled, teal) sia per lo
+// scheletro fantasma della migliore ripetizione storica (ghostEnabled,
+// viola) — stesso meccanismo di proiezione, colore diverso.
+function drawReferenceOverlay(lm, refPose, color){
   if(!refPose) return;
   const hipL = lm[23], hipR = lm[24], shL = lm[11], shR = lm[12];
   if(!hipL || !hipR || !shL || !shR) return;
@@ -7195,7 +7403,7 @@ function drawReferenceOverlay(lm, refPose){
   ];
   ctx.save();
   ctx.globalAlpha = 0.5;
-  ctx.strokeStyle = '#2dd4bf';
+  ctx.strokeStyle = color || '#2dd4bf';
   ctx.setLineDash([5, 5]);
   ctx.lineWidth = 3;
   connections.forEach(([a,b]) => {
@@ -7803,6 +8011,7 @@ function renderLoop(){
     // il frame va scartato senza interrompere il ciclo di rendering — un
     // singolo evaluate() che va in errore non deve mai spegnere per sempre
     // il feedback vocale e le altre elaborazioni per il resto della sessione.
+    lastFrameLm = lm;
     let evalResult = null;
     try{ evalResult = ex.evaluate(lm); } catch(err){
       evalResult = null;
@@ -7823,6 +8032,7 @@ function renderLoop(){
       lastActiveTick = activeTickNow;
 
       if(refPoseEnabled) drawReferenceOverlay(lm, ex.refPose);
+      if(ghostEnabled) drawReferenceOverlay(lm, getGhostPoseFor(currentExercise), '#c084fc');
       drawSkeleton(lm, evalResult.ok);
       setStatus(evalResult.ok, evalResult.statusMsg);
       announceRealtimeIssue(evalResult);
