@@ -129,6 +129,28 @@
   .brand span{ color:var(--accent); text-shadow:0 0 26px var(--accent-glow); }
   .tagline{ color:var(--ink-dim); font-size:12px; max-width:420px; text-align:right; line-height:1.55; }
 
+  /* Invito a installare la PWA: al posto di lasciare "Installa app" sepolto
+     nel menu del browser, un avviso proponibile una volta sola (richiudibile
+     e poi ricordato) più un accesso permanente in fondo alla pagina. */
+  .install-banner{
+    width:100%; max-width:1180px; margin:0 auto;
+    padding:12px 20px;
+    display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap;
+    background:var(--panel-2); border-bottom:1px solid var(--line-soft);
+    font-size:12.5px; color:var(--ink-dim); text-align:center;
+    box-sizing:border-box;
+  }
+  .install-banner-actions{ display:flex; align-items:center; gap:8px; flex-shrink:0; }
+  .install-banner-install-btn{
+    flex:none; padding:8px 16px; font-size:12.5px;
+  }
+  .install-banner-close{
+    background:none; border:none; color:var(--ink-dim); font-size:15px; line-height:1;
+    cursor:pointer; padding:5px 8px; border-radius:var(--radius-sm);
+    transition:color .15s var(--ease), background-color .15s var(--ease);
+  }
+  .install-banner-close:hover{ color:var(--ink); background:var(--panel-3); }
+
   main{
     width:100%;
     max-width:1180px;
@@ -745,7 +767,7 @@
   .history-chart-quality-row{ display:none; gap:5px; padding:0 4px; }
   .history-chart-quality-col{ flex:1; display:flex; justify-content:center; }
   .history-chart-quality-chip{ width:10px; height:10px; border-radius:3px; background:var(--line); }
-  .history-chart-record{ font-size:11.5px; color:var(--ink-dim); text-align:center; }
+  .history-chart-note{ font-size:11.5px; color:var(--ink-dim); text-align:center; }
 
   /* Isola il report settimanale quando si stampa (o si salva come PDF dal
      dialogo di stampa del browser): nasconde tutto il resto della pagina,
@@ -771,6 +793,14 @@
   </div>
   <div class="tagline">Prototipo didattico — non sostituisce la valutazione di un personal trainer o fisioterapista qualificato. Il rilevamento funziona meglio con buona illuminazione, inquadratura laterale e corpo intero visibile.</div>
 </header>
+
+<div class="install-banner" id="installBanner" style="display:none;" role="note">
+  <span id="installBannerText"></span>
+  <div class="install-banner-actions">
+    <button class="btn primary install-banner-install-btn" id="installBannerInstallBtn">Installa</button>
+    <button class="install-banner-close" id="installBannerCloseBtn" aria-label="Chiudi questo avviso">✕</button>
+  </div>
+</div>
 
 <main>
   <div class="stage" id="stage">
@@ -890,7 +920,8 @@
       </select>
       <div id="historyChart" style="width:100%; max-width:340px;"></div>
       <div class="history-chart-quality-row" id="historyChartQualityRow" aria-hidden="true"></div>
-      <div class="history-chart-record" id="historyChartRecord" style="width:100%; max-width:340px;"></div>
+      <div class="history-chart-note" id="historyChartInsight" style="width:100%; max-width:340px;"></div>
+      <div class="history-chart-note" id="historyChartRecord" style="width:100%; max-width:340px;"></div>
       <div id="historyList" style="width:100%; max-width:340px; max-height:36vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
       <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
         <button class="calib-skip" id="weeklyReportBtn">📄 Report settimanale</button>
@@ -1187,6 +1218,7 @@
 
 <footer>
   <button class="calib-skip" id="reopenOnboardingBtn">Rivedi la guida introduttiva</button>
+  <button class="calib-skip" id="installAppBtn" style="display:none;">📲 Installa l'app</button>
 </footer>
 
 <script type="module">
@@ -1317,6 +1349,7 @@ const wellnessSaveBtn = document.getElementById('wellnessSaveBtn');
 const wellnessBadge = document.getElementById('wellnessBadge');
 const historyChart = document.getElementById('historyChart');
 const historyChartQualityRow = document.getElementById('historyChartQualityRow');
+const historyChartInsight = document.getElementById('historyChartInsight');
 const historyChartRecord = document.getElementById('historyChartRecord');
 const historyPeriodTabs = document.getElementById('historyPeriodTabs');
 const historyExerciseFilter = document.getElementById('historyExerciseFilter');
@@ -1364,6 +1397,11 @@ const onboardingBackBtn = document.getElementById('onboardingBackBtn');
 const onboardingNextBtn = document.getElementById('onboardingNextBtn');
 const onboardingSkipBtn = document.getElementById('onboardingSkipBtn');
 const reopenOnboardingBtn = document.getElementById('reopenOnboardingBtn');
+const installBanner = document.getElementById('installBanner');
+const installBannerText = document.getElementById('installBannerText');
+const installBannerInstallBtn = document.getElementById('installBannerInstallBtn');
+const installBannerCloseBtn = document.getElementById('installBannerCloseBtn');
+const installAppBtn = document.getElementById('installAppBtn');
 
 const ICONS = {
   expand: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H3v6"/><path d="M15 21h6v-6"/><path d="M3 3l7 7"/><path d="M21 21l-7-7"/></svg>',
@@ -1446,6 +1484,105 @@ onboardingSkipBtn.addEventListener('click', closeOnboarding);
 reopenOnboardingBtn.addEventListener('click', showOnboarding);
 
 showOnboarding();
+
+// --- Invito a installare la PWA ---------------------------------------
+// Chrome/Edge/Android emettono "beforeinstallprompt": lo intercettiamo per
+// mostrare un invito nostro (con testo e momento scelti da noi) invece di
+// lasciare "Installa app" sepolto nel menu del browser. Safari/iOS non
+// emette affatto questo evento: lì l'unica via è mostrare le istruzioni
+// manuali (Condividi -> Aggiungi a Home). In entrambi i casi, un pulsante
+// permanente in fondo alla pagina resta disponibile anche dopo che
+// l'avviso iniziale viene chiuso, così l'installazione non si perde per
+// chi l'ha ignorato la prima volta.
+const INSTALL_DISMISSED_KEY = 'formacheck_install_dismissed_v1';
+let deferredInstallPrompt = null;
+
+function isStandaloneDisplay(){
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+function isIosSafari(){
+  const ua = navigator.userAgent || '';
+  const isIos = /iphone|ipad|ipod/i.test(ua) && !window.MSStream;
+  const isSafariEngine = /safari/i.test(ua) && !/crios|fxios|edgios|opios/i.test(ua);
+  return isIos && isSafariEngine;
+}
+function installDismissed(){
+  try{ return localStorage.getItem(INSTALL_DISMISSED_KEY) === '1'; } catch(e){ return false; }
+}
+function markInstallDismissed(){
+  try{ localStorage.setItem(INSTALL_DISMISSED_KEY, '1'); } catch(e){ /* storage non disponibile */ }
+}
+
+function showInstallBanner(mode){ // mode: 'native' | 'ios'
+  installBannerText.textContent = mode === 'ios'
+    ? "Installa FormaCheck sulla schermata Home: tocca Condividi 📤 nella barra di Safari, poi \"Aggiungi a Home\"."
+    : "Installa FormaCheck sulla schermata Home per aprirla come un'app, a schermo intero.";
+  installBannerInstallBtn.style.display = mode === 'ios' ? 'none' : '';
+  installBanner.style.display = 'flex';
+}
+function hideInstallBanner(){
+  installBanner.style.display = 'none';
+}
+
+// Decide se mostrare il pulsante permanente in fondo alla pagina, e se
+// proporre anche l'avviso in alto (solo se non è già stato chiuso prima).
+function updateInstallAvailability(){
+  if(isStandaloneDisplay()){
+    // Già installata e aperta come app: nessun invito ha senso.
+    hideInstallBanner();
+    installAppBtn.style.display = 'none';
+    return;
+  }
+  if(deferredInstallPrompt){
+    installAppBtn.style.display = '';
+    if(!installDismissed()) showInstallBanner('native');
+  } else if(isIosSafari()){
+    installAppBtn.style.display = '';
+    if(!installDismissed()) showInstallBanner('ios');
+  } else {
+    installAppBtn.style.display = 'none';
+  }
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault(); // evita il mini-banner nativo, mostriamo il nostro
+  deferredInstallPrompt = e;
+  updateInstallAvailability();
+});
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  hideInstallBanner();
+  installAppBtn.style.display = 'none';
+  markInstallDismissed();
+});
+
+async function triggerNativeInstallPrompt(){
+  if(!deferredInstallPrompt) return;
+  const promptEvent = deferredInstallPrompt;
+  deferredInstallPrompt = null; // il prompt nativo si può usare una sola volta
+  try{ promptEvent.prompt(); await promptEvent.userChoice; }
+  catch(e){ /* l'utente ha chiuso il prompt, o il browser l'ha già scartato */ }
+  updateInstallAvailability();
+}
+
+installBannerInstallBtn.addEventListener('click', () => {
+  hideInstallBanner();
+  triggerNativeInstallPrompt();
+});
+installBannerCloseBtn.addEventListener('click', () => {
+  hideInstallBanner();
+  markInstallDismissed();
+});
+installAppBtn.addEventListener('click', () => {
+  if(deferredInstallPrompt){
+    triggerNativeInstallPrompt();
+  } else if(isIosSafari()){
+    showInstallBanner('ios');
+    installBanner.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+});
+
+updateInstallAvailability(); // copre subito il caso iOS, che non emette beforeinstallprompt
 
 let appMode = 'single'; // single | circuit
 let restDuration = 60;
@@ -5949,6 +6086,48 @@ function formatHistoryVolume(volume, exerciseKey){
   return volume >= 60 ? (volume / 60).toFixed(1).replace('.0', '') + ' min' : volume + ' sec';
 }
 
+// Confronta la seconda metà del periodo mostrato con la prima, per dare in
+// una riga la lettura che altrimenti richiederebbe di interpretare a occhio
+// l'andamento delle barre: quanto è cambiato il volume, e se la qualità
+// media (quando disponibile) è cresciuta, calata o stabile. Vale per
+// qualunque livello di zoom, perché lavora sui bucket già aggregati.
+function computeHistoryInsight(buckets){
+  if(buckets.length < 2) return null;
+  const midCount = Math.floor(buckets.length / 2);
+  const older = buckets.slice(0, buckets.length - midCount);
+  const recent = buckets.slice(buckets.length - midCount);
+
+  const volOlder = older.reduce((s, b) => s + b.volume, 0);
+  const volRecent = recent.reduce((s, b) => s + b.volume, 0);
+  if(volOlder === 0 && volRecent === 0) return null;
+
+  let icon, text;
+  if(volOlder === 0){
+    icon = '🆕';
+    text = 'Hai iniziato ad allenarti nella seconda metà del periodo';
+  } else if(volRecent === 0){
+    icon = '📉';
+    text = 'Nessuna attività nella seconda metà del periodo, dopo la prima';
+  } else {
+    const pct = Math.round(((volRecent - volOlder) / volOlder) * 100);
+    icon = pct > 0 ? '📈' : (pct < 0 ? '📉' : '➡️');
+    text = 'Seconda metà del periodo: ' + (pct === 0 ? 'volume stabile' : ((pct > 0 ? '+' : '') + pct + '% di volume')) + ' rispetto alla prima';
+  }
+
+  // Media qualità pesata sul volume di ciascuna metà, stesso criterio già
+  // usato per il singolo bucket in computeHistoryChartData.
+  const qOlder = older.reduce((s, b) => s + b.qualitySum, 0);
+  const wOlder = older.reduce((s, b) => s + b.qualityWeight, 0);
+  const qRecent = recent.reduce((s, b) => s + b.qualitySum, 0);
+  const wRecent = recent.reduce((s, b) => s + b.qualityWeight, 0);
+  if(wOlder > 0 && wRecent > 0){
+    const diff = Math.round((qRecent / wRecent) - (qOlder / wOlder));
+    text += diff >= 5 ? ', qualità in crescita' : (diff <= -5 ? ', qualità in calo' : ', qualità stabile');
+  }
+
+  return icon + ' ' + text + '.';
+}
+
 // Ricostruisce le opzioni del filtro esercizio in base a cosa è davvero
 // presente in cronologia, per non offrire scelte che darebbero sempre un
 // grafico vuoto. Conserva la selezione corrente se è ancora valida.
@@ -6017,6 +6196,8 @@ function renderHistoryChart(){
       historyChartQualityRow.appendChild(col);
     });
   }
+
+  historyChartInsight.textContent = computeHistoryInsight(buckets) || '';
 
   const withData = buckets.filter(b => b.volume > 0);
   if(withData.length === 0){
