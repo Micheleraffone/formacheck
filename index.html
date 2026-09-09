@@ -743,7 +743,7 @@
 <header>
   <div style="display:flex; align-items:center; gap:12px;">
     <div class="brand">Forma<span>Check</span></div>
-    <button class="theme-toggle-btn" id="themeToggleBtn" title="Passa al tema chiaro"></button>
+    <button class="theme-toggle-btn" id="themeToggleBtn" title="Passa al tema chiaro" aria-label="Passa al tema chiaro"></button>
   </div>
   <div class="tagline">Prototipo didattico — non sostituisce la valutazione di un personal trainer o fisioterapista qualificato. Il rilevamento funziona meglio con buona illuminazione, inquadratura laterale e corpo intero visibile.</div>
 </header>
@@ -765,7 +765,7 @@
     <canvas id="pipCanvas" width="320" height="200" style="position:fixed; left:-9999px; top:0; width:320px; height:200px;"></canvas>
     <video id="pipVideo" muted playsinline style="position:fixed; left:-9999px; top:0; width:320px; height:200px;"></video>
     <div class="stage-badge" id="fpsBadge">— fps</div>
-    <button class="expand-btn" id="expandBtn" title="Ingrandisci l'inquadratura">⤢</button>
+    <button class="expand-btn" id="expandBtn" title="Ingrandisci l'inquadratura" aria-label="Ingrandisci l'inquadratura">⤢</button>
     <div class="loading-overlay" id="loadingOverlay" style="display:none;">
       Caricamento modello di pose estimation…<br>può richiedere qualche secondo
     </div>
@@ -828,13 +828,13 @@
         <div id="streakBadge" style="font-family:'Manrope', sans-serif; font-weight:700; font-size:15px;">🔥 0 giorni di fila</div>
         <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-dim);">
           <span>Obiettivo: allenamenti a settimana</span>
-          <input type="number" id="goalWeeklyInput" min="1" max="14" value="3" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+          <input type="number" id="goalWeeklyInput" min="1" max="14" value="3" aria-label="Obiettivo: allenamenti a settimana" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
         </div>
         <div class="calib-progress" style="width:220px;"><div class="calib-progress-bar" id="goalProgressBar"></div></div>
         <div id="goalProgressLabel" style="font-size:11.5px; color:var(--ink-dim);"></div>
         <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-dim);">
           <span>Peso corporeo, per stimare le calorie</span>
-          <input type="number" id="bodyWeightInput" min="30" max="250" placeholder="70" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+          <input type="number" id="bodyWeightInput" min="30" max="250" placeholder="70" aria-label="Peso corporeo in chilogrammi, per stimare le calorie" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
           <span>kg</span>
         </div>
         <div id="caloriesTotalBadge" class="calib-status-note" style="display:none;"></div>
@@ -844,13 +844,13 @@
           <div class="section-label">Benessere di oggi (Hooper Index) — 1 ottimo, 7 pessimo</div>
           <div style="display:grid; grid-template-columns:1fr auto; gap:6px 10px; width:100%; font-size:12px; color:var(--ink-dim); align-items:center;">
             <span>Affaticamento</span>
-            <input type="number" id="wellnessFatigue" min="1" max="7" value="4" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+            <input type="number" id="wellnessFatigue" min="1" max="7" value="4" aria-label="Affaticamento, da 1 (ottimo) a 7 (pessimo)" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
             <span>Qualità del sonno (7 = ha dormito male)</span>
-            <input type="number" id="wellnessSleep" min="1" max="7" value="4" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+            <input type="number" id="wellnessSleep" min="1" max="7" value="4" aria-label="Qualità del sonno, da 1 a 7, 7 vuol dire ha dormito male" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
             <span>Dolori muscolari</span>
-            <input type="number" id="wellnessSoreness" min="1" max="7" value="4" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+            <input type="number" id="wellnessSoreness" min="1" max="7" value="4" aria-label="Dolori muscolari, da 1 (nessuno) a 7 (molti)" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
             <span>Stress</span>
-            <input type="number" id="wellnessStress" min="1" max="7" value="4" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+            <input type="number" id="wellnessStress" min="1" max="7" value="4" aria-label="Stress, da 1 (nessuno) a 7 (molto)" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
           </div>
           <button class="calib-skip" id="wellnessSaveBtn">Salva benessere di oggi</button>
           <div class="calib-status-note" id="wellnessBadge" style="display:none;"></div>
@@ -936,11 +936,11 @@
 
     <div id="repGoalRow" style="display:none; align-items:center; justify-content:center; gap:8px; font-size:11.5px; color:var(--ink-dim); padding-bottom:4px; flex-wrap:wrap;">
       <span>Traguardo</span>
-      <input type="number" id="repGoalInput" min="1" value="10" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
+      <input type="number" id="repGoalInput" min="1" value="10" aria-label="Traguardo ripetizioni o secondi" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
       <span id="repGoalUnit">ripetizioni</span>
       <span style="opacity:.5;">·</span>
       <span id="setsGoalUnit">serie</span>
-      <input type="number" id="setsGoalInput" min="1" value="1" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
+      <input type="number" id="setsGoalInput" min="1" value="1" aria-label="Numero di serie" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
     </div>
     <div class="calib-status-note" id="setBadge" style="display:none; text-align:center;"></div>
 
@@ -958,7 +958,7 @@
     <div class="howto-panel">
       <button class="howto-toggle" id="howtoToggle" aria-expanded="false">
         <span>Come si esegue</span>
-        <span class="howto-chevron" id="howtoChevron">▾</span>
+        <span class="howto-chevron" id="howtoChevron" aria-hidden="true">▾</span>
       </button>
       <ol class="howto-list" id="howtoList" hidden></ol>
     </div>
@@ -966,7 +966,7 @@
     <div class="muscle-panel">
       <div class="section-label">Muscoli coinvolti</div>
       <div class="muscle-figure-wrap">
-        <svg class="muscle-figure" id="muscleFigure" viewBox="0 0 140 300" xmlns="http://www.w3.org/2000/svg">
+        <svg class="muscle-figure" id="muscleFigure" viewBox="0 0 140 300" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <circle class="muscle-static" cx="70" cy="22" r="16"/>
           <rect class="muscle-static" x="64" y="35" width="12" height="12"/>
           <rect class="muscle-region" data-region="shoulders" x="38" y="46" width="64" height="14" rx="7"/>
@@ -1021,7 +1021,7 @@
     <div class="settings-group">
       <button class="settings-group-toggle" id="advancedTrainingToggle" aria-expanded="false">
         <span>⚙️ Allenamento avanzato</span>
-        <span class="settings-group-chevron" id="advancedTrainingChevron">▾</span>
+        <span class="settings-group-chevron" id="advancedTrainingChevron" aria-hidden="true">▾</span>
       </button>
       <div class="settings-group-body" id="advancedTrainingBody" hidden>
         <button class="btn" id="apreBtn" style="width:100%; display:none;">🎯 Autoregolazione APRE disattivata — tocca per attivare</button>
@@ -1029,9 +1029,9 @@
         <button class="btn" id="clusterBtn" style="width:100%; display:none;">🔄 Cluster set disattivato — tocca per attivare</button>
         <div id="clusterConfigRow" style="display:none; align-items:center; justify-content:center; gap:8px; font-size:11.5px; color:var(--ink-dim); padding:6px 0;">
           <span>Ogni</span>
-          <input type="number" id="clusterSizeInput" min="1" value="2" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
+          <input type="number" id="clusterSizeInput" min="1" value="2" aria-label="Ogni quante ripetizioni fare una pausa nel cluster set" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
           <span>rip. pausa di</span>
-          <input type="number" id="clusterRestInput" min="5" value="15" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
+          <input type="number" id="clusterRestInput" min="5" value="15" aria-label="Durata della pausa cluster in secondi" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
           <span>s</span>
         </div>
         <div class="calib-status-note" id="clusterHint" style="display:none;">Suddivide la serie in mini-blocchi con una breve pausa tra uno e l'altro, invece di ripetizioni continue: aiuta a mantenere la potenza alta invece di lasciarla calare per la fatica, come nel "cluster training" usato nell'allenamento della forza esplosiva.</div>
@@ -1052,7 +1052,7 @@
     <div class="settings-group">
       <button class="settings-group-toggle" id="voiceAccessibilityToggle" aria-expanded="false">
         <span>🔈 Vocale e accessibilità</span>
-        <span class="settings-group-chevron" id="voiceAccessibilityChevron">▾</span>
+        <span class="settings-group-chevron" id="voiceAccessibilityChevron" aria-hidden="true">▾</span>
       </button>
       <div class="settings-group-body" id="voiceAccessibilityBody" hidden>
         <div>
@@ -1076,7 +1076,7 @@
     <div class="settings-group">
       <button class="settings-group-toggle" id="historyDataToggle" aria-expanded="false">
         <span>📊 Cronologia e dati</span>
-        <span class="settings-group-chevron" id="historyDataChevron">▾</span>
+        <span class="settings-group-chevron" id="historyDataChevron" aria-hidden="true">▾</span>
       </button>
       <div class="settings-group-body" id="historyDataBody" hidden>
         <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
@@ -1144,7 +1144,7 @@
 
     <div>
       <div class="section-label">Feedback</div>
-      <div class="feedback-list" id="feedbackList">
+      <div class="feedback-list" id="feedbackList" aria-live="polite">
         <div class="fb-item">Avvia la fotocamera e posizionati di lato all'inquadratura, a figura intera.</div>
       </div>
     </div>
@@ -1349,7 +1349,9 @@ function saveTheme(theme){
 function applyTheme(theme){
   document.documentElement.setAttribute('data-theme', theme);
   themeToggleBtn.innerHTML = theme === 'light' ? ICONS.moon : ICONS.sun;
-  themeToggleBtn.title = theme === 'light' ? 'Passa al tema scuro' : 'Passa al tema chiaro';
+  const label = theme === 'light' ? 'Passa al tema scuro' : 'Passa al tema chiaro';
+  themeToggleBtn.title = label;
+  themeToggleBtn.setAttribute('aria-label', label); // pulsante a sola icona: senza, chi usa un lettore di schermo non saprebbe cosa fa
 }
 let currentTheme = loadTheme();
 applyTheme(currentTheme);
@@ -4854,7 +4856,7 @@ function buildCircuitList(){
     row.innerHTML =
       '<input type="checkbox" id="circ_' + key + '" data-key="' + key + '">' +
       '<label for="circ_' + key + '">' + ex.label + '</label>' +
-      '<input type="number" min="1" value="' + defaultTarget + '" id="circtarget_' + key + '">' +
+      '<input type="number" min="1" value="' + defaultTarget + '" id="circtarget_' + key + '" aria-label="Obiettivo per ' + ex.label + ' in ' + (ex.mode === 'reps' ? 'ripetizioni' : 'secondi') + '">' +
       '<span class="unit">' + (ex.mode === 'reps' ? 'reps' : 'sec') + '</span>';
     circuitListEl.appendChild(row);
   });
@@ -5204,9 +5206,11 @@ function updateGoalUI(){
   if(ex.mode === 'reps'){
     repGoalInput.value = repGoal;
     repGoalUnit.textContent = 'ripetizioni';
+    repGoalInput.setAttribute('aria-label', 'Traguardo ripetizioni');
   } else {
     repGoalInput.value = timerGoalSeconds;
     repGoalUnit.textContent = 'secondi';
+    repGoalInput.setAttribute('aria-label', 'Traguardo secondi');
   }
   setsGoalInput.value = setsGoal;
   singleRestPresetWrap.style.display = setsGoal > 1 ? 'block' : 'none';
@@ -7242,7 +7246,9 @@ expandBtn.addEventListener('click', () => {
   const isExpanded = stageEl.classList.toggle('expanded');
   document.body.classList.toggle('stage-locked', isExpanded);
   expandBtn.innerHTML = isExpanded ? ICONS.collapse : ICONS.expand;
-  expandBtn.title = isExpanded ? 'Riduci' : "Ingrandisci l'inquadratura";
+  const label = isExpanded ? 'Riduci' : "Ingrandisci l'inquadratura";
+  expandBtn.title = label;
+  expandBtn.setAttribute('aria-label', label); // pulsante a sola icona: stesso motivo del tema
 });
 
 // Registra il service worker (app installabile, apertura più rapida): la
