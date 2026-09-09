@@ -680,6 +680,34 @@
     border-radius:var(--radius-sm); padding:9px 11px; line-height:1.55;
   }
 
+  /* Piano di oggi: suggerimento generato dalla cronologia, per non lasciare
+     l'utente a scegliere da zero ogni volta cosa allenare. Bordo accentato
+     per distinguerlo dalle note di stato neutre (.calib-status-note). */
+  .plan-card{
+    background:var(--panel-2); border:1px solid var(--accent-dim);
+    border-left:3px solid var(--accent);
+    border-radius:var(--radius-md); padding:14px 14px 12px;
+    display:flex; flex-direction:column; gap:10px;
+  }
+  .plan-card-header{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .plan-card-title{ font-family:'Manrope', sans-serif; font-weight:700; font-size:13.5px; color:var(--ink); }
+  .plan-card-refresh{
+    background:none; border:none; color:var(--ink-dim); font-size:15px; cursor:pointer;
+    padding:4px 6px; border-radius:var(--radius-sm); line-height:1;
+    transition:color .15s var(--ease), background-color .15s var(--ease), transform .2s var(--ease);
+  }
+  .plan-card-refresh:hover{ color:var(--accent); background:var(--panel-3); transform:rotate(60deg); }
+  .plan-card-reason{ font-size:11.5px; color:var(--ink-dim); line-height:1.5; }
+  .plan-card-list{ display:flex; flex-direction:column; gap:5px; }
+  .plan-card-item{
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    background:var(--panel-3); border:1px solid var(--line); border-radius:var(--radius-sm);
+    padding:7px 10px; font-size:12.5px;
+  }
+  .plan-card-item-name{ color:var(--ink); font-weight:600; }
+  .plan-card-item-target{ color:var(--ink-dim); flex-shrink:0; }
+  .plan-card-actions{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:2px; }
+
   .circuit-builder{ display:flex; flex-direction:column; gap:6px; }
   .circuit-row{
     display:flex; align-items:center; gap:8px;
@@ -964,6 +992,19 @@
   </div>
 
   <div class="panel">
+    <div class="plan-card" id="planCard" style="display:none;">
+      <div class="plan-card-header">
+        <span class="plan-card-title">📋 Piano di oggi</span>
+        <button class="plan-card-refresh" id="planRefreshBtn" title="Genera un altro piano" aria-label="Genera un altro piano">🔄</button>
+      </div>
+      <div class="plan-card-reason" id="planReason"></div>
+      <div class="plan-card-list" id="planList"></div>
+      <div class="plan-card-actions">
+        <button class="btn primary" id="planUseBtn" style="flex:none; padding:9px 18px;">Usa questo piano</button>
+        <button class="calib-skip" id="planDismissBtn">Non ora</button>
+      </div>
+    </div>
+
     <div>
       <div class="section-label">Modalità</div>
       <div class="exercise-select" id="modeSelect" style="grid-template-columns:1fr 1fr 1fr;">
@@ -1283,6 +1324,12 @@ const voiceCommandHint = document.getElementById('voiceCommandHint');
 const modeSelect = document.getElementById('modeSelect');
 const singleModeSection = document.getElementById('singleModeSection');
 const circuitBuilder = document.getElementById('circuitBuilder');
+const planCard = document.getElementById('planCard');
+const planReason = document.getElementById('planReason');
+const planList = document.getElementById('planList');
+const planRefreshBtn = document.getElementById('planRefreshBtn');
+const planUseBtn = document.getElementById('planUseBtn');
+const planDismissBtn = document.getElementById('planDismissBtn');
 const pairModeNote = document.getElementById('pairModeNote');
 const pairCountersRow = document.getElementById('pairCountersRow');
 const pairNumA = document.getElementById('pairNumA');
@@ -5155,6 +5202,149 @@ saveProgramBtn.addEventListener('click', () => {
 
 renderSavedPrograms();
 
+// --- Piano di oggi ---------------------------------------------------
+// Riduce l'attrito di aprire l'app senza sapere cosa allenare: propone un
+// circuito pronto, scelto dalla cronologia invece che a caso. Riusa
+// applyProgramToBuilder (già scritta per i programmi salvati) con un
+// "programma" generato al volo — nessuna nuova infrastruttura di avvio.
+const MUSCLE_REGION_LABELS = {
+  thighs: 'Gambe', hips: 'Glutei', core: 'Core', chest: 'Petto',
+  arms: 'Braccia', shoulders: 'Spalle', calves: 'Polpacci'
+};
+let currentSuggestedPlan = null;
+let planDismissedThisSession = false;
+
+function daysSinceLastTrained(exerciseKey, hist){
+  let lastTs = null;
+  hist.forEach(e => { if(e.key === exerciseKey && (lastTs == null || e.ts > lastTs)) lastTs = e.ts; });
+  return lastTs == null ? Infinity : (Date.now() - lastTs) / 86400000;
+}
+
+// Media delle ultime sessioni per quell'esercizio, con un piccolo
+// incremento (sovraccarico progressivo) o una riduzione se è consigliato
+// alleggerire; senza cronologia per quell'esercizio, il default prudente
+// già usato altrove nel circuit builder.
+function suggestedTargetFor(exerciseKey, hist, lighten){
+  const ex = EXERCISES[exerciseKey];
+  const defaultTarget = ex.mode === 'reps' ? 10 : 30;
+  const values = hist.filter(e => e.key === exerciseKey)
+    .sort((a, b) => b.ts - a.ts).slice(0, 5)
+    .map(e => ex.mode === 'reps' ? (e.valid || 0) : (e.seconds || 0))
+    .filter(v => v > 0);
+  if(values.length === 0) return defaultTarget;
+  const avg = values.reduce((s, v) => s + v, 0) / values.length;
+  const adjusted = lighten ? avg * 0.85 : avg * 1.1;
+  return ex.mode === 'reps' ? Math.max(4, Math.round(adjusted)) : Math.max(15, Math.round(adjusted / 5) * 5);
+}
+
+// Mescola solo i gruppi di esercizi a pari merito (stessi giorni dall'ultima
+// volta — tipicamente "mai allenati"), così il pulsante di rigenerazione dà
+// davvero varietà invece di riproporre sempre lo stesso ordine.
+function shuffleTiedGroups(ranked){
+  const out = [];
+  let i = 0;
+  while(i < ranked.length){
+    let j = i + 1;
+    while(j < ranked.length && ranked[j].days === ranked[i].days) j++;
+    const group = ranked.slice(i, j);
+    for(let k = group.length - 1; k > 0; k--){
+      const r = Math.floor(Math.random() * (k + 1));
+      [group[k], group[r]] = [group[r], group[k]];
+    }
+    out.push(...group);
+    i = j;
+  }
+  return out;
+}
+
+function generateSuggestedPlan(){
+  const hist = loadHistory();
+  const deload = computeDeloadRecommendation();
+  const lighten = !!(deload && (deload.level === 'high' || deload.level === 'mid'));
+  const exerciseCount = deload && deload.level === 'high' ? 2 : 4;
+
+  const ranked = shuffleTiedGroups(
+    Object.keys(EXERCISES)
+      .map(key => ({ key, days: daysSinceLastTrained(key, hist) }))
+      .sort((a, b) => b.days - a.days)
+  );
+
+  // Primo giro: privilegia varietà di zone muscolari tra gli esercizi
+  // scelti. Secondo giro: se non bastano zone "nuove", completa comunque
+  // fino al numero desiderato.
+  const selected = [];
+  const usedRegions = new Set();
+  ranked.forEach(({ key }) => {
+    if(selected.length >= exerciseCount) return;
+    const regions = EXERCISES[key].muscles.visual;
+    if(regions.some(r => usedRegions.has(r))) return;
+    selected.push(key);
+    regions.forEach(r => usedRegions.add(r));
+  });
+  ranked.forEach(({ key }) => {
+    if(selected.length >= exerciseCount) return;
+    if(!selected.includes(key)) selected.push(key);
+  });
+
+  const steps = selected.map(key => ({ key, target: suggestedTargetFor(key, hist, lighten) }));
+
+  let reason;
+  if(hist.length === 0){
+    reason = 'Nessuna cronologia ancora: si parte con un circuito equilibrato per tutto il corpo.';
+  } else if(lighten){
+    reason = (deload.level === 'high' ? '🛑' : '⚠️') + ' Il carico recente suggerisce di alleggerire: circuito più breve, obiettivi ridotti, più riposo.';
+  } else {
+    const regionsHit = new Set();
+    selected.forEach(key => EXERCISES[key].muscles.visual.forEach(r => regionsHit.add(r)));
+    const labels = [...regionsHit].map(r => MUSCLE_REGION_LABELS[r] || r);
+    reason = 'Zone non allenate di recente: ' + labels.join(', ') + '.';
+  }
+  const goal = loadGoal();
+  const weekCount = computeWeekCount();
+  if(weekCount < goal.weeklyTarget){
+    const missing = goal.weeklyTarget - weekCount;
+    reason += ' Ti manca' + (missing === 1 ? '' : 'no') + ' ' + missing + ' allenament' + (missing === 1 ? 'o' : 'i') + ' per l\'obiettivo di questa settimana.';
+  }
+
+  return { name: 'Piano di oggi', steps, rest: lighten && deload.level === 'high' ? 90 : 60, reason };
+}
+
+function renderPlanCard(){
+  if(running || planDismissedThisSession){
+    planCard.style.display = 'none';
+    return;
+  }
+  currentSuggestedPlan = generateSuggestedPlan();
+  planReason.textContent = currentSuggestedPlan.reason;
+  planList.innerHTML = '';
+  currentSuggestedPlan.steps.forEach(step => {
+    const ex = EXERCISES[step.key];
+    const row = document.createElement('div');
+    row.className = 'plan-card-item';
+    row.innerHTML =
+      '<span class="plan-card-item-name">' + ex.label + '</span>' +
+      '<span class="plan-card-item-target">' + step.target + ' ' + (ex.mode === 'reps' ? 'rip.' : 'sec') + '</span>';
+    planList.appendChild(row);
+  });
+  planCard.style.display = 'flex';
+}
+
+planRefreshBtn.addEventListener('click', renderPlanCard);
+planDismissBtn.addEventListener('click', () => {
+  planDismissedThisSession = true;
+  planCard.style.display = 'none';
+});
+planUseBtn.addEventListener('click', () => {
+  if(!currentSuggestedPlan || currentSuggestedPlan.steps.length === 0) return;
+  const circuitModeBtn = modeSelect.querySelector('[data-mode="circuit"]');
+  if(circuitModeBtn && !circuitModeBtn.classList.contains('active')) circuitModeBtn.click();
+  applyProgramToBuilder(currentSuggestedPlan);
+  planCard.style.display = 'none';
+  circuitBuilder.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+renderPlanCard();
+
 function startButtonLabel(){
   if(appMode === 'circuit') return 'Avvia circuito';
   if(appMode === 'pair') return 'Avvia allenamento in coppia';
@@ -5846,6 +6036,7 @@ function stopSession(){
   circuitCancelBtn.style.display = 'none';
 
   running = false;
+  renderPlanCard(); // torna a proporre un piano ora che si è di nuovo alla schermata di scelta
   stopPairMode();
   // Ferma anche una frase vocale ancora in coda o in corso: senza questa
   // riga, a sessione già terminata (fotocamera spenta, schermata tornata
@@ -7668,6 +7859,7 @@ async function startCameraAndPose(numPoses){
   }
   loadingOverlay.style.display = 'none';
   running = true;
+  planCard.style.display = 'none'; // la fotocamera è avviata: il piano proposto non ha più senso qui
   resetBtn.disabled = false;
   requestWakeLock();
   return true;
