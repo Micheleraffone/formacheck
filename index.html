@@ -828,6 +828,7 @@
   <div style="display:flex; align-items:center; gap:12px;">
     <div class="brand">Forma<span>Check</span></div>
     <button class="theme-toggle-btn" id="themeToggleBtn" title="Passa al tema chiaro" aria-label="Passa al tema chiaro"></button>
+    <button class="theme-toggle-btn" id="profileBtn" title="Profilo" aria-label="Cambia profilo" style="font-family:'Manrope', sans-serif; font-weight:700; font-size:13px;"></button>
   </div>
   <div class="tagline">Prototipo didattico — non sostituisce la valutazione di un personal trainer o fisioterapista qualificato. Il rilevamento funziona meglio con buona illuminazione, inquadratura laterale e corpo intero visibile.</div>
 </header>
@@ -873,6 +874,14 @@
       <div class="calib-hint" id="thresholdCalibPrompt"></div>
       <div class="calib-progress"><div class="calib-progress-bar" id="thresholdCalibBar"></div></div>
       <button class="calib-skip" id="thresholdCalibCancel">Annulla</button>
+    </div>
+    <div class="calib-overlay" id="warmupOverlay" style="display:none;">
+      <div class="calib-title">🔥 Riscaldamento guidato</div>
+      <div class="view-badge-icon" style="font-size:32px;">🤸</div>
+      <div class="calib-hint" id="warmupMoveLabel" style="font-size:16px; color:var(--ink);"></div>
+      <div class="calib-hint" id="warmupMoveHint"></div>
+      <div class="rest-countdown" id="warmupCountdown">20</div>
+      <button class="calib-skip" id="warmupSkipBtn">Salta riscaldamento</button>
     </div>
     <div class="calib-overlay" id="restOverlay" style="display:none;">
       <div class="calib-title">Riposo</div>
@@ -993,6 +1002,24 @@
       <div id="reactionStatus" class="calib-status-note" style="text-align:center; width:100%; max-width:280px;">Inquadrati per intero e resta fermo…</div>
       <div id="reactionTrialsList" style="width:100%; max-width:280px; display:flex; flex-direction:column; gap:4px;"></div>
       <button class="calib-skip" id="reactionTestCloseBtn">Interrompi</button>
+    </div>
+    <div class="calib-overlay" id="postureCheckOverlay" style="display:none;">
+      <div class="calib-title">🧍 Check-up posturale</div>
+      <div class="calib-hint" id="postureCheckStatus" style="max-width:300px;"></div>
+      <div class="rest-countdown" id="postureCheckCountdown"></div>
+      <div id="postureCheckResults" style="width:100%; max-width:300px; display:none; flex-direction:column; gap:8px;"></div>
+      <div class="calib-hint" style="font-size:11px; opacity:0.75; max-width:280px;">Uno screening informale, non una valutazione clinica: se qualcosa ti sembra fuori norma, parlane con un fisioterapista.</div>
+      <button class="calib-skip" id="postureCheckCloseBtn">Chiudi</button>
+    </div>
+    <div class="calib-overlay" id="profileOverlay" style="display:none;">
+      <div class="calib-title">👤 Profili</div>
+      <div class="calib-hint" style="max-width:300px;">Ogni profilo ha la propria cronologia, obiettivi, soglie calibrate, programmi e record — utile se più persone condividono lo stesso telefono. Tema, voce e altre preferenze restano condivise tra tutti i profili. Cambiare o creare un profilo ricarica la pagina.</div>
+      <div id="profileList" style="width:100%; max-width:300px; display:flex; flex-direction:column; gap:8px;"></div>
+      <div style="display:flex; gap:8px; width:100%; max-width:300px; box-sizing:border-box;">
+        <input type="text" id="newProfileNameInput" placeholder="Nome nuovo profilo" maxlength="20" aria-label="Nome del nuovo profilo" style="flex:1; min-width:0; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:8px; font-family:'Manrope', sans-serif;">
+        <button class="btn primary" id="addProfileBtn" style="flex:none; padding:8px 14px;">+ Crea</button>
+      </div>
+      <button class="calib-skip" id="profileCloseBtn">Chiudi</button>
     </div>
     <div class="calib-overlay" id="onboardingOverlay" style="display:none;">
       <div class="calib-title" id="onboardingTitle">Benvenuto</div>
@@ -1143,6 +1170,7 @@
       <button class="btn primary" id="startBtn">Avvia fotocamera</button>
       <button class="btn" id="resetBtn" disabled>Azzera</button>
     </div>
+    <button class="btn" id="warmupBtn" style="width:100%;" title="Una breve sequenza di mobilità guidata a voce, mirata sui gruppi muscolari dell'esercizio scelto, prima di iniziare a freddo.">🔥 Riscaldamento guidato</button>
 
     <div class="settings-group">
       <button class="settings-group-toggle" id="advancedTrainingToggle" aria-expanded="false">
@@ -1210,6 +1238,8 @@
         <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
         <button class="btn" id="reactionTestBtn" style="width:100%;" title="Test del tempo di reazione: un protocollo reale usato nel ritorno allo sport dopo infortunio e nell'allenamento neuromuscolare. Serve la fotocamera già avviata.">⏱️ Test tempo di reazione</button>
         <div class="calib-status-note" id="reactionTestHint">Misura quanto ci metti a reagire a uno stimolo a comparsa casuale: lo stesso tipo di test usato nel ritorno allo sport dopo un infortunio, per valutare la prontezza neuromuscolare. Serve la fotocamera già avviata.</div>
+        <button class="btn" id="postureCheckBtn" style="width:100%;" title="Screening informale di livello spalle, livello bacino e allineamento laterale busto-bacino, in piedi frontale alla fotocamera per pochi secondi. Serve la fotocamera già avviata.">🧍 Check-up posturale</button>
+        <div class="calib-status-note" id="postureCheckHint">Uno screening rapido e informale — non una valutazione clinica — di livello spalle, livello bacino e allineamento laterale, in piedi frontale alla fotocamera per pochi secondi. Serve la fotocamera già avviata.</div>
 
         <div>
           <div class="section-label">Backup dati</div>
@@ -1292,6 +1322,12 @@ const canvas = document.getElementById('overlay');
 const ctx = canvas.getContext('2d');
 const startBtn = document.getElementById('startBtn');
 const resetBtn = document.getElementById('resetBtn');
+const warmupBtn = document.getElementById('warmupBtn');
+const warmupOverlay = document.getElementById('warmupOverlay');
+const warmupMoveLabel = document.getElementById('warmupMoveLabel');
+const warmupMoveHint = document.getElementById('warmupMoveHint');
+const warmupCountdown = document.getElementById('warmupCountdown');
+const warmupSkipBtn = document.getElementById('warmupSkipBtn');
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const loadingOverlay = document.getElementById('loadingOverlay');
@@ -1440,6 +1476,12 @@ const reactionStimulusBox = document.getElementById('reactionStimulusBox');
 const reactionStatus = document.getElementById('reactionStatus');
 const reactionTrialsList = document.getElementById('reactionTrialsList');
 const reactionTestCloseBtn = document.getElementById('reactionTestCloseBtn');
+const postureCheckBtn = document.getElementById('postureCheckBtn');
+const postureCheckOverlay = document.getElementById('postureCheckOverlay');
+const postureCheckStatus = document.getElementById('postureCheckStatus');
+const postureCheckCountdown = document.getElementById('postureCheckCountdown');
+const postureCheckResults = document.getElementById('postureCheckResults');
+const postureCheckCloseBtn = document.getElementById('postureCheckCloseBtn');
 const historyExportBtn = document.getElementById('historyExportBtn');
 const historyClearBtn = document.getElementById('historyClearBtn');
 const historyCloseBtn = document.getElementById('historyCloseBtn');
@@ -1463,6 +1505,12 @@ const singleRestPresetWrap = document.getElementById('singleRestPresetWrap');
 // Piccole icone SVG in stile lineare (coerenti con l'estetica tecnica
 // dell'app), al posto delle emoji nei controlli principali.
 const themeToggleBtn = document.getElementById('themeToggleBtn');
+const profileBtn = document.getElementById('profileBtn');
+const profileOverlay = document.getElementById('profileOverlay');
+const profileList = document.getElementById('profileList');
+const newProfileNameInput = document.getElementById('newProfileNameInput');
+const addProfileBtn = document.getElementById('addProfileBtn');
+const profileCloseBtn = document.getElementById('profileCloseBtn');
 const onboardingOverlay = document.getElementById('onboardingOverlay');
 const onboardingTitle = document.getElementById('onboardingTitle');
 const onboardingText = document.getElementById('onboardingText');
@@ -1670,6 +1718,58 @@ let circuitList = []; // [{key, target}]
 let circuitIndex = 0;
 let circuitActive = false;
 let circuitResults = [];
+
+// --- Profili --------------------------------------------------------------
+// Più persone possono condividere lo stesso telefono: ogni profilo ha la
+// propria cronologia, obiettivi, soglie calibrate, programmi salvati,
+// scheletro fantasma e cronologia dei test — tutto ciò che è "dato
+// personale" invece che "preferenza dell'app" (tema, voce, sottotitoli,
+// promemoria attivo/disattivato restano condivisi tra tutti i profili,
+// non ha senso separarli). Cambiare profilo ricarica la pagina — il modo
+// più semplice e sicuro per far ripartire l'app con lo stato in memoria
+// coerente con i dati appena selezionati, esattamente come già fa il
+// ripristino di un backup.
+//
+// Il profilo "default" usa le chiavi di storage originali, senza alcun
+// suffisso: chi aggiorna l'app con dati già esistenti li ritrova intatti,
+// senza bisogno di alcuna migrazione. Solo i profili aggiunti in seguito
+// ottengono chiavi con un suffisso proprio.
+const PROFILES_KEY = 'formacheck_profiles_v1';
+const ACTIVE_PROFILE_KEY = 'formacheck_active_profile_v1';
+const DEFAULT_PROFILE_ID = 'default';
+const PROFILE_COLORS = ['#2dd4bf', '#38bdf8', '#fb923c', '#f472b6', '#a78bfa', '#facc15'];
+
+function loadProfiles(){
+  try{
+    const raw = localStorage.getItem(PROFILES_KEY);
+    const list = raw ? JSON.parse(raw) : null;
+    if(Array.isArray(list) && list.length) return list;
+  } catch(e){ /* storage non disponibile: ricadi sul profilo di default */ }
+  return [{ id: DEFAULT_PROFILE_ID, name: 'Tu', color: PROFILE_COLORS[0] }];
+}
+function saveProfiles(list){
+  try{ localStorage.setItem(PROFILES_KEY, JSON.stringify(list)); } catch(e){ /* storage non disponibile */ }
+}
+function getActiveProfileId(){
+  try{
+    const id = localStorage.getItem(ACTIVE_PROFILE_KEY);
+    if(id) return id;
+  } catch(e){ /* storage non disponibile */ }
+  return DEFAULT_PROFILE_ID;
+}
+function setActiveProfileId(id){
+  try{ localStorage.setItem(ACTIVE_PROFILE_KEY, id); } catch(e){ /* storage non disponibile */ }
+}
+function getActiveProfile(){
+  const id = getActiveProfileId();
+  return loadProfiles().find(p => p.id === id) || loadProfiles()[0];
+}
+// Chiave di storage effettiva per il profilo attivo, dato il nome "base"
+// di una chiave personale — vedi la nota sopra sul profilo default.
+function profKey(baseKey){
+  const id = getActiveProfileId();
+  return id === DEFAULT_PROFILE_ID ? baseKey : baseKey + '__' + id;
+}
 
 let currentExercise = 'squat';
 let poseLandmarker = null;
@@ -2181,14 +2281,14 @@ let ghostStoreCache = null;
 function loadGhostStore(){
   if(ghostStoreCache) return ghostStoreCache;
   try{
-    const raw = localStorage.getItem(GHOST_STORAGE_KEY);
+    const raw = localStorage.getItem(profKey(GHOST_STORAGE_KEY));
     ghostStoreCache = raw ? JSON.parse(raw) : {};
   } catch(e){ ghostStoreCache = {}; }
   return ghostStoreCache;
 }
 function saveGhostStore(store){
   ghostStoreCache = store;
-  try{ localStorage.setItem(GHOST_STORAGE_KEY, JSON.stringify(store)); } catch(e){ /* storage non disponibile */ }
+  try{ localStorage.setItem(profKey(GHOST_STORAGE_KEY), JSON.stringify(store)); } catch(e){ /* storage non disponibile */ }
 }
 function getGhostPoseFor(exerciseKey){
   const entry = loadGhostStore()[exerciseKey];
@@ -4266,7 +4366,7 @@ const THRESH_STORAGE_KEY = 'formacheck_thresholds_v1';
 
 function loadSavedThresholds(){
   try{
-    const raw = localStorage.getItem(THRESH_STORAGE_KEY);
+    const raw = localStorage.getItem(profKey(THRESH_STORAGE_KEY));
     if(!raw) return;
     const saved = JSON.parse(raw);
     Object.keys(saved).forEach(key => {
@@ -4283,10 +4383,10 @@ function loadSavedThresholds(){
 
 function saveThresholds(key, refPose){
   try{
-    const raw = localStorage.getItem(THRESH_STORAGE_KEY);
+    const raw = localStorage.getItem(profKey(THRESH_STORAGE_KEY));
     const saved = raw ? JSON.parse(raw) : {};
     saved[key] = { thresholds: EXERCISES[key].thresholds, calibratedAt: new Date().toISOString(), refPose: refPose || (saved[key] && saved[key].refPose) };
-    localStorage.setItem(THRESH_STORAGE_KEY, JSON.stringify(saved));
+    localStorage.setItem(profKey(THRESH_STORAGE_KEY), JSON.stringify(saved));
   } catch(e){
     // storage non disponibile: le soglie personalizzate restano valide solo per questa sessione
   }
@@ -4294,7 +4394,7 @@ function saveThresholds(key, refPose){
 
 function getSavedMeta(key){
   try{
-    const raw = localStorage.getItem(THRESH_STORAGE_KEY);
+    const raw = localStorage.getItem(profKey(THRESH_STORAGE_KEY));
     if(!raw) return null;
     const saved = JSON.parse(raw);
     return saved[key] || null;
@@ -4312,7 +4412,7 @@ let pairThresholdsStore = { A: {}, B: {} };
 
 function loadPairThresholds(){
   try{
-    const raw = localStorage.getItem(PAIR_THRESH_STORAGE_KEY);
+    const raw = localStorage.getItem(profKey(PAIR_THRESH_STORAGE_KEY));
     if(raw) pairThresholdsStore = JSON.parse(raw);
   } catch(e){
     // dati corrotti o storage non disponibile: si riparte da soglie condivise di default
@@ -4323,7 +4423,7 @@ function savePairThresholds(slot, exerciseKey, thresholds, refPose){
   try{
     if(!pairThresholdsStore[slot]) pairThresholdsStore[slot] = {};
     pairThresholdsStore[slot][exerciseKey] = { thresholds, refPose, calibratedAt: new Date().toISOString() };
-    localStorage.setItem(PAIR_THRESH_STORAGE_KEY, JSON.stringify(pairThresholdsStore));
+    localStorage.setItem(profKey(PAIR_THRESH_STORAGE_KEY), JSON.stringify(pairThresholdsStore));
   } catch(e){
     // storage non disponibile: la taratura resta valida solo per questa sessione
   }
@@ -4357,7 +4457,7 @@ try{
 
 function loadHistory(){
   try{
-    const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+    const raw = localStorage.getItem(profKey(HISTORY_STORAGE_KEY));
     return raw ? JSON.parse(raw) : [];
   } catch(e){ return []; }
 }
@@ -4367,14 +4467,14 @@ function saveHistoryEntry(entry){
     const hist = loadHistory();
     hist.push(entry);
     const trimmed = hist.length > HISTORY_MAX_ENTRIES ? hist.slice(hist.length - HISTORY_MAX_ENTRIES) : hist;
-    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(trimmed));
+    localStorage.setItem(profKey(HISTORY_STORAGE_KEY), JSON.stringify(trimmed));
   } catch(e){
     // storage non disponibile: la cronologia resta valida solo per questa sessione
   }
 }
 
 function clearHistory(){
-  try{ localStorage.removeItem(HISTORY_STORAGE_KEY); } catch(e){ /* storage non disponibile */ }
+  try{ localStorage.removeItem(profKey(HISTORY_STORAGE_KEY)); } catch(e){ /* storage non disponibile */ }
 }
 
 // Salva nello storico l'attività dell'esercizio corrente, se ce n'è stata
@@ -4549,12 +4649,12 @@ const GOAL_STORAGE_KEY = 'formacheck_goal_v1';
 
 function loadGoal(){
   try{
-    const raw = localStorage.getItem(GOAL_STORAGE_KEY);
+    const raw = localStorage.getItem(profKey(GOAL_STORAGE_KEY));
     return raw ? JSON.parse(raw) : { weeklyTarget: 3 };
   } catch(e){ return { weeklyTarget: 3 }; }
 }
 function saveGoal(goal){
-  try{ localStorage.setItem(GOAL_STORAGE_KEY, JSON.stringify(goal)); } catch(e){ /* storage non disponibile */ }
+  try{ localStorage.setItem(profKey(GOAL_STORAGE_KEY), JSON.stringify(goal)); } catch(e){ /* storage non disponibile */ }
 }
 
 // Giorni consecutivi (fino a oggi) con almeno un allenamento registrato. Se
@@ -4812,10 +4912,10 @@ function renderAcwrBadge(){
 const WELLNESS_STORAGE_KEY = 'formacheck_wellness_v1';
 
 function loadWellness(){
-  try{ return JSON.parse(localStorage.getItem(WELLNESS_STORAGE_KEY) || '{}'); } catch(e){ return {}; }
+  try{ return JSON.parse(localStorage.getItem(profKey(WELLNESS_STORAGE_KEY)) || '{}'); } catch(e){ return {}; }
 }
 function saveWellnessAll(all){
-  try{ localStorage.setItem(WELLNESS_STORAGE_KEY, JSON.stringify(all)); } catch(e){ /* storage non disponibile */ }
+  try{ localStorage.setItem(profKey(WELLNESS_STORAGE_KEY), JSON.stringify(all)); } catch(e){ /* storage non disponibile */ }
 }
 function todayKey(){
   const d = new Date();
@@ -4991,12 +5091,12 @@ const DEFAULT_BODY_WEIGHT_KG = 70; // usato quando l'utente non ha impostato il 
 
 function loadBodyWeight(){
   try{
-    const val = parseFloat(localStorage.getItem(WEIGHT_STORAGE_KEY));
+    const val = parseFloat(localStorage.getItem(profKey(WEIGHT_STORAGE_KEY)));
     return (val && val > 0) ? val : null;
   } catch(e){ return null; }
 }
 function saveBodyWeight(kg){
-  try{ localStorage.setItem(WEIGHT_STORAGE_KEY, String(kg)); } catch(e){ /* storage non disponibile */ }
+  try{ localStorage.setItem(profKey(WEIGHT_STORAGE_KEY), String(kg)); } catch(e){ /* storage non disponibile */ }
 }
 
 function estimateKcal(exerciseKey, activeMs){
@@ -5013,7 +5113,7 @@ bodyWeightInput.addEventListener('change', () => {
     saveBodyWeight(val);
   } else {
     bodyWeightInput.value = '';
-    try{ localStorage.removeItem(WEIGHT_STORAGE_KEY); } catch(e){ /* storage non disponibile */ }
+    try{ localStorage.removeItem(profKey(WEIGHT_STORAGE_KEY)); } catch(e){ /* storage non disponibile */ }
   }
   renderGoalPanel();
 });
@@ -5424,12 +5524,12 @@ const PROGRAMS_STORAGE_KEY = 'formacheck_programs_v1';
 
 function loadPrograms(){
   try{
-    const raw = localStorage.getItem(PROGRAMS_STORAGE_KEY);
+    const raw = localStorage.getItem(profKey(PROGRAMS_STORAGE_KEY));
     return raw ? JSON.parse(raw) : [];
   } catch(e){ return []; }
 }
 function savePrograms(programs){
-  try{ localStorage.setItem(PROGRAMS_STORAGE_KEY, JSON.stringify(programs)); } catch(e){ /* storage non disponibile */ }
+  try{ localStorage.setItem(profKey(PROGRAMS_STORAGE_KEY), JSON.stringify(programs)); } catch(e){ /* storage non disponibile */ }
 }
 
 function renderSavedPrograms(){
@@ -6133,14 +6233,14 @@ function renderReactionTrialsList(){
 
 const REACTION_HISTORY_KEY = 'formacheck_reaction_v1';
 function loadReactionHistory(){
-  try{ return JSON.parse(localStorage.getItem(REACTION_HISTORY_KEY) || '[]'); } catch(e){ return []; }
+  try{ return JSON.parse(localStorage.getItem(profKey(REACTION_HISTORY_KEY)) || '[]'); } catch(e){ return []; }
 }
 function saveReactionTestResult(entry){
   try{
     const all = loadReactionHistory();
     all.push(entry);
     const trimmed = all.length > 50 ? all.slice(all.length - 50) : all;
-    localStorage.setItem(REACTION_HISTORY_KEY, JSON.stringify(trimmed));
+    localStorage.setItem(profKey(REACTION_HISTORY_KEY), JSON.stringify(trimmed));
   } catch(e){ /* storage non disponibile */ }
 }
 
@@ -6187,6 +6287,153 @@ function stopReactionTest(){
 
 reactionTestBtn.addEventListener('click', startReactionTest);
 reactionTestCloseBtn.addEventListener('click', stopReactionTest);
+
+// --- Check-up posturale (screening informale, non clinico) -------------
+// Modalità standalone come il test di reazione: non è legata a un
+// esercizio, serve solo che la fotocamera sia già avviata. In piedi,
+// frontale alla fotocamera, per pochi secondi controlla tre cose che un
+// fisioterapista guarderebbe per prime in una valutazione posturale
+// informale — livello delle spalle, livello del bacino, e se l'asse
+// busto-bacino è verticale o spostato lateralmente — usando solo i
+// landmark già forniti dal modello di posa, nessuna nuova rilevazione.
+// Deliberatamente prudente nel linguaggio (mai diagnostico) e con un
+// promemoria esplicito che non sostituisce una valutazione vera.
+const POSTURE_CHECK_COUNTDOWN_S = 3;
+const POSTURE_CHECK_SAMPLE_MS = 2500;
+const POSTURE_CHECK_HISTORY_KEY = 'formacheck_posture_check_v1';
+let postureCheckActive = false;
+let postureCheckPhase = 'idle'; // 'countdown' | 'sampling' | 'done'
+let postureCheckTimerId = null;
+let postureCheckSamples = [];
+
+function postureCheckTick(lm){
+  if(postureCheckPhase !== 'sampling') return;
+  const lSh = lm[11], rSh = lm[12], lHip = lm[23], rHip = lm[24];
+  if(!lSh || !rSh || !lHip || !rHip) return;
+  const shoulderWidth = Math.abs(lSh.x - rSh.x) || 0.01;
+  const hipWidth = Math.abs(lHip.x - rHip.x) || 0.01;
+  postureCheckSamples.push({
+    // positivo = lato destro più in basso nell'immagine (y cresce verso il basso)
+    shoulderDiff: (rSh.y - lSh.y) / shoulderWidth,
+    hipDiff: (rHip.y - lHip.y) / hipWidth,
+    // positivo = centro spalle spostato a destra rispetto al centro bacino
+    leanDiff: ((lSh.x + rSh.x) / 2 - (lHip.x + rHip.x) / 2) / shoulderWidth
+  });
+}
+
+function postureCheckTier(absVal){
+  if(absVal < 0.08) return 'ok';
+  if(absVal < 0.18) return 'warn';
+  return 'bad';
+}
+function postureCheckTierColor(tier){
+  return tier === 'ok' ? 'var(--ok)' : tier === 'warn' ? 'var(--warn)' : 'var(--bad)';
+}
+function postureCheckTierIcon(tier){
+  return tier === 'ok' ? '🟢' : tier === 'warn' ? '🟡' : '🔴';
+}
+
+function loadPostureCheckHistory(){
+  try{ return JSON.parse(localStorage.getItem(profKey(POSTURE_CHECK_HISTORY_KEY)) || '[]'); } catch(e){ return []; }
+}
+function savePostureCheckResult(entry){
+  try{
+    const all = loadPostureCheckHistory();
+    all.push(entry);
+    const trimmed = all.length > 50 ? all.slice(all.length - 50) : all;
+    localStorage.setItem(profKey(POSTURE_CHECK_HISTORY_KEY), JSON.stringify(trimmed));
+  } catch(e){ /* storage non disponibile */ }
+}
+
+function renderPostureCheckResult(result){
+  const shTier = postureCheckTier(Math.abs(result.shoulderDiff));
+  const shSide = result.shoulderDiff > 0 ? 'destra' : 'sinistra';
+  const hipTier = postureCheckTier(Math.abs(result.hipDiff));
+  const hipSide = result.hipDiff > 0 ? 'destra' : 'sinistra';
+  const leanTier = postureCheckTier(Math.abs(result.leanDiff));
+  const leanSide = result.leanDiff > 0 ? 'destra' : 'sinistra';
+  const degree = (tier) => tier === 'warn' ? 'leggermente' : 'visibilmente';
+
+  const rows = [
+    { tier: shTier, text: shTier === 'ok' ? 'Spalle: livello quasi uguale tra i due lati.' : 'Spalle: la spalla ' + shSide + ' è ' + degree(shTier) + ' più bassa.' },
+    { tier: hipTier, text: hipTier === 'ok' ? 'Bacino: livello quasi uguale tra i due lati.' : 'Bacino: il lato ' + hipSide + ' è ' + degree(hipTier) + ' più basso.' },
+    { tier: leanTier, text: leanTier === 'ok' ? 'Asse busto-bacino: verticale, ben allineato.' : 'Asse busto-bacino: ' + degree(leanTier) + ' spostato verso ' + leanSide + '.' }
+  ];
+
+  postureCheckResults.innerHTML = '';
+  rows.forEach(row => {
+    const div = document.createElement('div');
+    div.className = 'calib-status-note';
+    div.style.color = postureCheckTierColor(row.tier);
+    div.style.textAlign = 'left';
+    div.textContent = postureCheckTierIcon(row.tier) + ' ' + row.text;
+    postureCheckResults.appendChild(div);
+  });
+  postureCheckResults.style.display = 'flex';
+  postureCheckStatus.textContent = 'Check-up completato.';
+  postureCheckCountdown.textContent = '';
+}
+
+function finishPostureCheck(){
+  postureCheckPhase = 'done';
+  if(postureCheckSamples.length < 5){
+    postureCheckStatus.textContent = 'Non è stato possibile leggere una posizione stabile: assicurati di essere ben visibile per intero e riprova.';
+    postureCheckCountdown.textContent = '';
+    postureCheckActive = false;
+    return;
+  }
+  const avg = (key) => postureCheckSamples.reduce((sum, s) => sum + s[key], 0) / postureCheckSamples.length;
+  const result = { shoulderDiff: avg('shoulderDiff'), hipDiff: avg('hipDiff'), leanDiff: avg('leanDiff') };
+  renderPostureCheckResult(result);
+  savePostureCheckResult(Object.assign({ ts: Date.now() }, result));
+  postureCheckActive = false;
+}
+
+function beginPostureSampling(){
+  postureCheckPhase = 'sampling';
+  postureCheckSamples = [];
+  postureCheckStatus.textContent = 'Resta fermo…';
+  postureCheckCountdown.textContent = '';
+  speak('Resta fermo.');
+  postureCheckTimerId = setTimeout(finishPostureCheck, POSTURE_CHECK_SAMPLE_MS);
+}
+
+function startPostureCheck(){
+  if(!running){
+    pushFeedback('Avvia prima la fotocamera per il check-up posturale.', false);
+    return;
+  }
+  postureCheckActive = true;
+  postureCheckPhase = 'countdown';
+  postureCheckSamples = [];
+  postureCheckResults.style.display = 'none';
+  postureCheckStatus.textContent = 'Mettiti in piedi, frontale alla fotocamera, braccia rilassate lungo i fianchi.';
+  speak('Mettiti in piedi, frontale alla fotocamera, braccia rilassate.');
+  let remaining = POSTURE_CHECK_COUNTDOWN_S;
+  postureCheckCountdown.textContent = remaining;
+  postureCheckOverlay.style.display = 'flex';
+  clearInterval(postureCheckTimerId);
+  postureCheckTimerId = setInterval(() => {
+    remaining--;
+    postureCheckCountdown.textContent = Math.max(0, remaining);
+    if(remaining > 0) speak(String(remaining));
+    if(remaining <= 0){
+      clearInterval(postureCheckTimerId);
+      beginPostureSampling();
+    }
+  }, 1000);
+}
+
+function stopPostureCheck(){
+  postureCheckActive = false;
+  postureCheckPhase = 'idle';
+  clearInterval(postureCheckTimerId);
+  clearTimeout(postureCheckTimerId);
+  postureCheckOverlay.style.display = 'none';
+}
+
+postureCheckBtn.addEventListener('click', startPostureCheck);
+postureCheckCloseBtn.addEventListener('click', stopPostureCheck);
 
 repGoalInput.addEventListener('change', () => {
   const val = Math.max(1, parseInt(repGoalInput.value, 10) || 1);
@@ -6333,6 +6580,7 @@ function stopSession(){
   pairCalibPendingSlot = null;
   calibTargetSlot = null;
   if(reactionTestActive) stopReactionTest(); // la fotocamera si sta fermando: non ha senso lasciare il test in corso
+  if(postureCheckActive) stopPostureCheck(); // idem per il check-up posturale
 
 
   clearInterval(restIntervalId);
@@ -7104,6 +7352,14 @@ const BACKUP_KEYS = [
   WEIGHT_STORAGE_KEY, REF_POSE_ENABLED_KEY, PROGRAMS_STORAGE_KEY,
   REMINDER_STORAGE_KEY, GHOST_STORAGE_KEY, GHOST_ENABLED_KEY
 ];
+// Quali delle chiavi sopra sono "dati personali" separati per profilo
+// (vedi profKey più in alto): il backup/ripristino riguarda solo il
+// profilo attivo al momento, non tutti i profili insieme — un limite
+// dichiarato, non un dimenticanza.
+const BACKUP_PROFILE_SCOPED_KEYS = [
+  THRESH_STORAGE_KEY, HISTORY_STORAGE_KEY, GOAL_STORAGE_KEY,
+  WEIGHT_STORAGE_KEY, PROGRAMS_STORAGE_KEY, GHOST_STORAGE_KEY
+];
 
 function showBackupStatus(msg, ok){
   backupStatusNote.textContent = (ok ? '✅ ' : '⚠️ ') + msg;
@@ -7113,8 +7369,9 @@ function showBackupStatus(msg, ok){
 function buildBackupPayload(){
   const data = {};
   BACKUP_KEYS.forEach(key => {
-    const raw = localStorage.getItem(key);
-    if(raw != null) data[key] = raw; // salvate come stringhe grezze: al ripristino vanno riscritte così come sono, senza reinterpretare il formato di ciascuna chiave
+    const storageKey = BACKUP_PROFILE_SCOPED_KEYS.includes(key) ? profKey(key) : key;
+    const raw = localStorage.getItem(storageKey);
+    if(raw != null) data[key] = raw; // salvate come stringhe grezze, sotto il nome "base" della chiave: al ripristino vanno riscritte così come sono, senza reinterpretare il formato di ciascuna chiave
   });
   return { app: 'formacheck', version: 1, exportedAt: new Date().toISOString(), data };
 }
@@ -7166,9 +7423,122 @@ async function readBackupFile(file){
 function applyBackup(parsed){
   BACKUP_KEYS.forEach(key => {
     const value = parsed.data[key];
-    if(typeof value === 'string') localStorage.setItem(key, value);
+    if(typeof value !== 'string') return;
+    const storageKey = BACKUP_PROFILE_SCOPED_KEYS.includes(key) ? profKey(key) : key;
+    localStorage.setItem(storageKey, value);
   });
 }
+
+// --- Profili (interfaccia) ---------------------------------------------
+// Il caricamento/salvataggio dei profili (profKey, loadProfiles, ecc.) è
+// dichiarato molto più in alto nel file, perché serve a tutte le funzioni
+// di storage dei dati personali sopra; la sola interfaccia vive qui, dove
+// tutte le chiavi personali (usate per ripulire i dati di un profilo
+// eliminato) sono già dichiarate.
+const PROFILE_PERSONAL_KEYS = [
+  THRESH_STORAGE_KEY, PAIR_THRESH_STORAGE_KEY, HISTORY_STORAGE_KEY,
+  GOAL_STORAGE_KEY, WEIGHT_STORAGE_KEY, PROGRAMS_STORAGE_KEY,
+  GHOST_STORAGE_KEY, REACTION_HISTORY_KEY, POSTURE_CHECK_HISTORY_KEY,
+  WELLNESS_STORAGE_KEY
+];
+function keyForProfile(baseKey, id){
+  return id === DEFAULT_PROFILE_ID ? baseKey : baseKey + '__' + id;
+}
+
+function updateProfileBtn(){
+  const p = getActiveProfile();
+  const initial = (p.name || '?').trim().charAt(0).toUpperCase() || '?';
+  profileBtn.textContent = initial;
+  profileBtn.style.color = p.color;
+  profileBtn.style.borderColor = p.color;
+  profileBtn.title = 'Profilo: ' + p.name + ' — tocca per cambiare';
+  profileBtn.setAttribute('aria-label', 'Profilo: ' + p.name + ' — tocca per cambiare');
+}
+
+function renderProfileList(){
+  const profiles = loadProfiles();
+  const activeId = getActiveProfileId();
+  profileList.innerHTML = '';
+  profiles.forEach(p => {
+    const isActive = p.id === activeId;
+    const row = document.createElement('div');
+    row.className = 'symmetry-row';
+    row.innerHTML =
+      '<div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">' +
+        '<span style="width:12px; height:12px; border-radius:50%; background:' + p.color + '; flex-shrink:0;"></span>' +
+        '<span class="symmetry-row-name" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + p.name + (isActive ? ' · attivo' : '') + '</span>' +
+      '</div>' +
+      '<span style="display:flex; gap:6px; flex-shrink:0;">' +
+        (isActive ? '' : '<button class="calib-skip" data-action="switch" data-id="' + p.id + '">Passa</button>') +
+        (profiles.length > 1 ? '<button class="calib-skip" data-action="delete" data-id="' + p.id + '">Elimina</button>' : '') +
+      '</span>';
+    profileList.appendChild(row);
+  });
+}
+
+// Cambiare profilo ricarica la pagina: il modo più semplice e sicuro per
+// far ripartire tutto lo stato in memoria (soglie calibrate, programmi
+// caricati, contatori, ecc.) coerente con i dati del profilo appena
+// selezionato, invece di dover invalidare a mano ogni cache esistente.
+function switchProfile(id){
+  if(id === getActiveProfileId()) return;
+  setActiveProfileId(id);
+  location.reload();
+}
+
+function addProfile(){
+  const name = newProfileNameInput.value.trim();
+  if(!name) return;
+  const profiles = loadProfiles();
+  const color = PROFILE_COLORS[profiles.length % PROFILE_COLORS.length];
+  const id = 'p' + Date.now().toString(36);
+  profiles.push({ id, name, color });
+  saveProfiles(profiles);
+  newProfileNameInput.value = '';
+  switchProfile(id); // passa subito al profilo appena creato
+}
+
+// Rimuove anche tutti i dati personali salvati per quel profilo, non solo
+// il profilo dall'elenco: altrimenti resterebbero dati orfani in
+// localStorage, mai più raggiungibili ma comunque occupati.
+function deleteProfile(id){
+  const profiles = loadProfiles();
+  if(profiles.length <= 1) return; // non si può eliminare l'ultimo profilo rimasto
+  const target = profiles.find(p => p.id === id);
+  if(!target) return;
+  if(!confirm('Eliminare il profilo "' + target.name + '"? Cronologia, obiettivi, soglie e record di questo profilo andranno persi per sempre.')) return;
+  PROFILE_PERSONAL_KEYS.forEach(baseKey => {
+    try{ localStorage.removeItem(keyForProfile(baseKey, id)); } catch(e){ /* storage non disponibile */ }
+  });
+  const remaining = profiles.filter(p => p.id !== id);
+  saveProfiles(remaining);
+  if(getActiveProfileId() === id){
+    setActiveProfileId(remaining[0].id);
+    location.reload();
+  } else {
+    renderProfileList();
+  }
+}
+
+profileBtn.addEventListener('click', () => {
+  renderProfileList();
+  profileOverlay.style.display = 'flex';
+});
+profileCloseBtn.addEventListener('click', () => {
+  profileOverlay.style.display = 'none';
+});
+addProfileBtn.addEventListener('click', addProfile);
+newProfileNameInput.addEventListener('keydown', (e) => {
+  if(e.key === 'Enter') addProfile();
+});
+profileList.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-action]');
+  if(!btn) return;
+  if(btn.dataset.action === 'switch') switchProfile(btn.dataset.id);
+  else if(btn.dataset.action === 'delete') deleteProfile(btn.dataset.id);
+});
+
+updateProfileBtn();
 
 async function importBackup(file){
   if(!file) return;
@@ -7177,7 +7547,7 @@ async function importBackup(file){
     const count = Object.keys(parsed.data).filter(k => BACKUP_KEYS.includes(k)).length;
     if(count === 0){ showBackupStatus('Il file non contiene dati riconosciuti.', false); return; }
     const when = parsed.exportedAt ? new Date(parsed.exportedAt).toLocaleString('it-IT') : 'file selezionato';
-    if(!confirm('Ripristinare il backup del ' + when + '? I dati locali attuali (storico, soglie, programmi) verranno sostituiti.')) return;
+    if(!confirm('Ripristinare il backup del ' + when + '? I dati del profilo attivo (storico, soglie, programmi) verranno sostituiti.')) return;
     applyBackup(parsed);
     showBackupStatus('Backup ripristinato, ricarico l\'app…', true);
     setTimeout(() => location.reload(), 1200); // il modo più semplice e sicuro per far ripartire tutta l'app dai dati appena scritti
@@ -7897,6 +8267,11 @@ function renderLoop(){
     return;
   }
 
+  if(postureCheckActive){
+    postureCheckTick(lm);
+    return;
+  }
+
   if(isResting){
     lastActiveTick = performance.now(); // il riposo non deve contare come tempo sotto sforzo per la stima calorie
     return; // durante il riposo non valutiamo l'esercizio, la fotocamera resta solo in anteprima
@@ -8234,8 +8609,91 @@ async function startCameraAndPose(numPoses){
   return true;
 }
 
+// --- Riscaldamento guidato ---------------------------------------------
+// Una breve sequenza di mobilità (non serve la fotocamera: solo voce e
+// timer, come il riposo tra le serie) mirata sui gruppi muscolari
+// dell'esercizio scelto, invece di partire a freddo. Una mossa per
+// gruppo muscolare coinvolto (fino a 3, per restare sotto il minuto).
+const WARMUP_MOVES = {
+  shoulders: { name: 'Circonduzioni di spalle', instruction: "Ruota le spalle in avanti e indietro, ampie e controllate." },
+  arms: { name: 'Slanci delle braccia', instruction: "Slancia le braccia avanti e indietro, aumentando gradualmente l'ampiezza." },
+  chest: { name: 'Apertura del petto', instruction: 'Porta le braccia dietro la schiena e apri il petto in avanti.' },
+  core: { name: 'Rotazioni del busto', instruction: 'Ruota lentamente il busto a destra e sinistra, braccia rilassate.' },
+  hips: { name: 'Cerchi con il bacino', instruction: 'Disegna ampi cerchi con il bacino, in entrambe le direzioni.' },
+  thighs: { name: 'Slanci di gamba', instruction: "Slancia una gamba avanti e indietro con movimento controllato, poi cambia lato." },
+  calves: { name: 'Sali e scendi sulle punte', instruction: 'Solleva i talloni da terra e riappoggiali, con ritmo controllato.' }
+};
+const WARMUP_STEP_SECONDS = 20;
+let warmupActive = false;
+let warmupTimerId = null;
+
+function pickWarmupMoves(exerciseKey){
+  const ex = EXERCISES[exerciseKey];
+  if(!ex) return [];
+  const seen = new Set();
+  const moves = [];
+  ex.muscles.visual.forEach(region => {
+    const move = WARMUP_MOVES[region];
+    if(move && !seen.has(region)){
+      seen.add(region);
+      moves.push(move);
+    }
+  });
+  return moves.slice(0, 3);
+}
+
+function runWarmupStep(moves, index){
+  if(!warmupActive) return;
+  if(index >= moves.length){
+    warmupActive = false;
+    speak('Riscaldamento completato. Ora tocca Avvia per iniziare.');
+    pushFeedback('🔥 Riscaldamento completato — tocca "Avvia fotocamera" per iniziare.', true);
+    warmupOverlay.style.display = 'none';
+    return;
+  }
+  const move = moves[index];
+  warmupMoveLabel.textContent = move.name;
+  warmupMoveHint.textContent = move.instruction;
+  speak(move.name + '. ' + move.instruction);
+  let remaining = WARMUP_STEP_SECONDS;
+  warmupCountdown.textContent = remaining;
+  clearInterval(warmupTimerId);
+  warmupTimerId = setInterval(() => {
+    remaining--;
+    warmupCountdown.textContent = Math.max(0, remaining);
+    if(remaining > 0 && remaining <= 3) speak(String(remaining));
+    if(remaining <= 0){
+      clearInterval(warmupTimerId);
+      runWarmupStep(moves, index + 1);
+    }
+  }, 1000);
+}
+
+function startWarmup(){
+  const moves = pickWarmupMoves(currentExercise);
+  if(moves.length === 0) return; // difensivo: ogni esercizio ha almeno un gruppo muscolare in muscles.visual
+  warmupActive = true;
+  warmupOverlay.style.display = 'flex';
+  runWarmupStep(moves, 0);
+}
+
+function skipWarmup(){
+  warmupActive = false;
+  clearInterval(warmupTimerId);
+  warmupTimerId = null;
+  warmupOverlay.style.display = 'none';
+  clearSpeechQueue(); // ferma subito la frase in corso/coda del riscaldamento
+}
+
+warmupBtn.addEventListener('click', () => {
+  if(running || warmupActive) return;
+  startWarmup();
+});
+warmupSkipBtn.addEventListener('click', skipWarmup);
+
 startBtn.addEventListener('click', async () => {
   if(onboardingOverlay.style.display !== 'none') closeOnboarding(); // avviare la fotocamera chiude subito la guida, se ancora aperta
+  if(warmupActive) skipWarmup(); // avviare la fotocamera interrompe un riscaldamento ancora in corso
   startBtn.disabled = true;
   startBtn.textContent = 'Avvio…';
 
