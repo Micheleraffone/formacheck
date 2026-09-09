@@ -874,6 +874,14 @@
       <div class="calib-progress"><div class="calib-progress-bar" id="thresholdCalibBar"></div></div>
       <button class="calib-skip" id="thresholdCalibCancel">Annulla</button>
     </div>
+    <div class="calib-overlay" id="warmupOverlay" style="display:none;">
+      <div class="calib-title">🔥 Riscaldamento guidato</div>
+      <div class="view-badge-icon" style="font-size:32px;">🤸</div>
+      <div class="calib-hint" id="warmupMoveLabel" style="font-size:16px; color:var(--ink);"></div>
+      <div class="calib-hint" id="warmupMoveHint"></div>
+      <div class="rest-countdown" id="warmupCountdown">20</div>
+      <button class="calib-skip" id="warmupSkipBtn">Salta riscaldamento</button>
+    </div>
     <div class="calib-overlay" id="restOverlay" style="display:none;">
       <div class="calib-title">Riposo</div>
       <div class="calib-hint" id="restNextLabel"></div>
@@ -1143,6 +1151,7 @@
       <button class="btn primary" id="startBtn">Avvia fotocamera</button>
       <button class="btn" id="resetBtn" disabled>Azzera</button>
     </div>
+    <button class="btn" id="warmupBtn" style="width:100%;" title="Una breve sequenza di mobilità guidata a voce, mirata sui gruppi muscolari dell'esercizio scelto, prima di iniziare a freddo.">🔥 Riscaldamento guidato</button>
 
     <div class="settings-group">
       <button class="settings-group-toggle" id="advancedTrainingToggle" aria-expanded="false">
@@ -1292,6 +1301,12 @@ const canvas = document.getElementById('overlay');
 const ctx = canvas.getContext('2d');
 const startBtn = document.getElementById('startBtn');
 const resetBtn = document.getElementById('resetBtn');
+const warmupBtn = document.getElementById('warmupBtn');
+const warmupOverlay = document.getElementById('warmupOverlay');
+const warmupMoveLabel = document.getElementById('warmupMoveLabel');
+const warmupMoveHint = document.getElementById('warmupMoveHint');
+const warmupCountdown = document.getElementById('warmupCountdown');
+const warmupSkipBtn = document.getElementById('warmupSkipBtn');
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const loadingOverlay = document.getElementById('loadingOverlay');
@@ -8234,8 +8249,91 @@ async function startCameraAndPose(numPoses){
   return true;
 }
 
+// --- Riscaldamento guidato ---------------------------------------------
+// Una breve sequenza di mobilità (non serve la fotocamera: solo voce e
+// timer, come il riposo tra le serie) mirata sui gruppi muscolari
+// dell'esercizio scelto, invece di partire a freddo. Una mossa per
+// gruppo muscolare coinvolto (fino a 3, per restare sotto il minuto).
+const WARMUP_MOVES = {
+  shoulders: { name: 'Circonduzioni di spalle', instruction: "Ruota le spalle in avanti e indietro, ampie e controllate." },
+  arms: { name: 'Slanci delle braccia', instruction: "Slancia le braccia avanti e indietro, aumentando gradualmente l'ampiezza." },
+  chest: { name: 'Apertura del petto', instruction: 'Porta le braccia dietro la schiena e apri il petto in avanti.' },
+  core: { name: 'Rotazioni del busto', instruction: 'Ruota lentamente il busto a destra e sinistra, braccia rilassate.' },
+  hips: { name: 'Cerchi con il bacino', instruction: 'Disegna ampi cerchi con il bacino, in entrambe le direzioni.' },
+  thighs: { name: 'Slanci di gamba', instruction: "Slancia una gamba avanti e indietro con movimento controllato, poi cambia lato." },
+  calves: { name: 'Sali e scendi sulle punte', instruction: 'Solleva i talloni da terra e riappoggiali, con ritmo controllato.' }
+};
+const WARMUP_STEP_SECONDS = 20;
+let warmupActive = false;
+let warmupTimerId = null;
+
+function pickWarmupMoves(exerciseKey){
+  const ex = EXERCISES[exerciseKey];
+  if(!ex) return [];
+  const seen = new Set();
+  const moves = [];
+  ex.muscles.visual.forEach(region => {
+    const move = WARMUP_MOVES[region];
+    if(move && !seen.has(region)){
+      seen.add(region);
+      moves.push(move);
+    }
+  });
+  return moves.slice(0, 3);
+}
+
+function runWarmupStep(moves, index){
+  if(!warmupActive) return;
+  if(index >= moves.length){
+    warmupActive = false;
+    speak('Riscaldamento completato. Ora tocca Avvia per iniziare.');
+    pushFeedback('🔥 Riscaldamento completato — tocca "Avvia fotocamera" per iniziare.', true);
+    warmupOverlay.style.display = 'none';
+    return;
+  }
+  const move = moves[index];
+  warmupMoveLabel.textContent = move.name;
+  warmupMoveHint.textContent = move.instruction;
+  speak(move.name + '. ' + move.instruction);
+  let remaining = WARMUP_STEP_SECONDS;
+  warmupCountdown.textContent = remaining;
+  clearInterval(warmupTimerId);
+  warmupTimerId = setInterval(() => {
+    remaining--;
+    warmupCountdown.textContent = Math.max(0, remaining);
+    if(remaining > 0 && remaining <= 3) speak(String(remaining));
+    if(remaining <= 0){
+      clearInterval(warmupTimerId);
+      runWarmupStep(moves, index + 1);
+    }
+  }, 1000);
+}
+
+function startWarmup(){
+  const moves = pickWarmupMoves(currentExercise);
+  if(moves.length === 0) return; // difensivo: ogni esercizio ha almeno un gruppo muscolare in muscles.visual
+  warmupActive = true;
+  warmupOverlay.style.display = 'flex';
+  runWarmupStep(moves, 0);
+}
+
+function skipWarmup(){
+  warmupActive = false;
+  clearInterval(warmupTimerId);
+  warmupTimerId = null;
+  warmupOverlay.style.display = 'none';
+  clearSpeechQueue(); // ferma subito la frase in corso/coda del riscaldamento
+}
+
+warmupBtn.addEventListener('click', () => {
+  if(running || warmupActive) return;
+  startWarmup();
+});
+warmupSkipBtn.addEventListener('click', skipWarmup);
+
 startBtn.addEventListener('click', async () => {
   if(onboardingOverlay.style.display !== 'none') closeOnboarding(); // avviare la fotocamera chiude subito la guida, se ancora aperta
+  if(warmupActive) skipWarmup(); // avviare la fotocamera interrompe un riscaldamento ancora in corso
   startBtn.disabled = true;
   startBtn.textContent = 'Avvio…';
 
