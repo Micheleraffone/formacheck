@@ -5046,6 +5046,7 @@ function finishCircuit(){
   circuitSummaryList.innerHTML = '';
   let summaryText = '💪 FormaCheck — Circuito completato\n';
   let totalKcal = 0;
+  const cardRows = []; // stessi dati delle righe a schermo, per la scheda-immagine condivisibile
   circuitResults.forEach(r => {
     const row = document.createElement('div');
     row.className = 'circuit-summary-row';
@@ -5053,6 +5054,7 @@ function finishCircuit(){
     row.innerHTML = '<span>' + r.label + '</span><span>' + r.achieved + ' / ' + r.target + ' ' + r.unit + invalidNote + '</span>';
     circuitSummaryList.appendChild(row);
     summaryText += '• ' + r.label + ': ' + r.achieved + '/' + r.target + ' ' + r.unit + (r.invalid > 0 ? ' (' + r.invalid + ' scartate)' : '') + '\n';
+    cardRows.push({ label: r.label, value: r.achieved + '/' + r.target + ' ' + r.unit });
     totalKcal += r.kcal || 0;
   });
   if(totalKcal >= 1){
@@ -5061,9 +5063,10 @@ function finishCircuit(){
     kcalRow.innerHTML = '<span>Calorie stimate</span><span>~' + Math.round(totalKcal) + ' kcal</span>';
     circuitSummaryList.appendChild(kcalRow);
     summaryText += '~' + Math.round(totalKcal) + ' kcal stimate\n';
+    cardRows.push({ label: 'Calorie stimate', value: '~' + Math.round(totalKcal) + ' kcal' });
   }
   circuitSummaryOverlay.style.display = 'flex';
-  circuitSummaryShareBtn.onclick = () => shareText(summaryText);
+  circuitSummaryShareBtn.onclick = () => shareCard({ heading: 'Circuito completato', big: circuitResults.length, bigLabel: circuitResults.length === 1 ? 'esercizio completato' : 'esercizi completati', rows: cardRows }, summaryText);
   if(voiceEnabled) speak('Circuito completato, ottimo lavoro.');
   hapticCelebrate();
 }
@@ -5695,19 +5698,33 @@ resetBtn.addEventListener('click', () => {
 function showSessionSummary(onClose){
   const ex = EXERCISES[currentExercise];
   sessionSummaryBody.innerHTML = '';
+  const cardRows = []; // stessi dati delle righe a schermo, per la scheda-immagine condivisibile
 
   const addRow = (label, value) => {
     const row = document.createElement('div');
     row.className = 'circuit-summary-row';
     row.innerHTML = '<span>' + label + '</span><span>' + value + '</span>';
     sessionSummaryBody.appendChild(row);
+    cardRows.push({ label, value });
   };
+  // "Esercizio" resta solo a schermo (nel DOM): sulla scheda-immagine
+  // condivisibile il nome dell'esercizio è già il titolo in alto, ripeterlo
+  // anche come prima riga di statistica sarebbe ridondante.
+  const addScreenOnlyRow = (label, value) => {
+    const row = document.createElement('div');
+    row.className = 'circuit-summary-row';
+    row.innerHTML = '<span>' + label + '</span><span>' + value + '</span>';
+    sessionSummaryBody.appendChild(row);
+  };
+  addScreenOnlyRow('Esercizio', ex.label);
 
-  addRow('Esercizio', ex.label);
+  let cardBig, cardBigLabel;
   let summaryText = '💪 FormaCheck — ' + ex.label + '\n';
   if(ex.mode === 'reps'){
     const total = repCount + invalidRepCount;
     const accuracy = total > 0 ? Math.round((repCount / total) * 100) : null;
+    cardBig = repCount;
+    cardBigLabel = 'ripetizioni valide';
     addRow('Ripetizioni valide', repCount);
     addRow('Ripetizioni scartate', invalidRepCount);
     if(accuracy != null) addRow('Precisione', accuracy + '%');
@@ -5716,6 +5733,8 @@ function showSessionSummary(onClose){
     if(accuracy != null) summaryText += ' (' + accuracy + '% di precisione)';
   } else {
     const timeStr = formatRestTime(Math.round(timerSeconds));
+    cardBig = timeStr;
+    cardBigLabel = 'in tenuta corretta';
     addRow('Tempo in tenuta corretta', timeStr);
     summaryText += timeStr + ' in tenuta corretta';
   }
@@ -5758,7 +5777,7 @@ function showSessionSummary(onClose){
   updateRpeSelection();
 
   sessionSummaryOverlay.style.display = 'flex';
-  sessionSummaryShareBtn.onclick = () => shareText(summaryText);
+  sessionSummaryShareBtn.onclick = () => shareCard({ heading: ex.label, big: cardBig, bigLabel: cardBigLabel, rows: cardRows }, summaryText);
   sessionSummaryCloseBtn.onclick = () => {
     sessionSummaryOverlay.style.display = 'none';
     onClose();
@@ -6030,6 +6049,118 @@ async function shareText(text){
     pushFeedback('Riepilogo copiato negli appunti.', true);
   } catch(e){
     pushFeedback('Condivisione non disponibile su questo browser.', false);
+  }
+}
+
+// --- scheda riepilogo condivisibile come immagine ---
+// Oltre al solo testo, disegna una scheda grafica in stile "activity card"
+// (come quelle di Strava/Apple Fitness) su un canvas non visibile — nessuna
+// libreria esterna, nessun asset da scaricare. Il tema della scheda è
+// sempre lo stesso (scuro, colori del marchio) indipendentemente dal tema
+// chiaro/scuro attivo in quel momento nell'app: un'immagine condivisa deve
+// avere lo stesso aspetto su qualunque dispositivo la guardi, non dipendere
+// da un'impostazione locale di chi l'ha generata.
+async function renderShareCard({ heading, big, bigLabel, rows }){
+  try{ await document.fonts.ready; } catch(e){ /* prosegue comunque con il font di riserva */ }
+  const W = 1080;
+  const rowH = 78;
+  const rowsStartY = 560;
+  // Altezza calcolata sul numero di righe effettive, non fissa: con poche
+  // statistiche (es. una tenuta cronometrata, senza serie né cluster) una
+  // scheda a formato fisso lascerebbe un vuoto enorme in basso; con molte,
+  // rischierebbe di tagliarle. Un minimo comunque garantisce una scheda
+  // sempre dignitosa anche senza nessuna riga secondaria.
+  const H = Math.max(820, rowsStartY + rows.length * rowH + 170);
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const c = cv.getContext('2d');
+
+  const grad = c.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#151d2c');
+  grad.addColorStop(1, '#0e1420');
+  c.fillStyle = grad;
+  c.fillRect(0, 0, W, H);
+
+  c.textBaseline = 'alphabetic';
+  c.textAlign = 'left';
+  c.font = '700 44px Manrope, sans-serif';
+  c.fillStyle = '#eef2f8';
+  c.fillText('Forma', 64, 100);
+  c.fillStyle = '#2dd4bf';
+  c.fillText('Check', 64 + c.measureText('Forma').width, 100);
+
+  c.font = '600 34px Manrope, sans-serif';
+  c.fillStyle = '#8b95a8';
+  c.fillText(heading, 64, 170);
+
+  // Il numero principale (ripetizioni, tempo in tenuta...) può essere un
+  // testo lungo (es. "12:34" invece di "24"): restringe da solo la
+  // dimensione del font finché non entra nella larghezza della scheda,
+  // invece di uscirne o sovrapporsi ai bordi.
+  c.textAlign = 'center';
+  let bigSize = 170;
+  const bigText = String(big);
+  do {
+    c.font = '800 ' + bigSize + 'px Manrope, sans-serif';
+    bigSize -= 6;
+  } while(c.measureText(bigText).width > W - 140 && bigSize > 60);
+  c.fillStyle = '#eef2f8';
+  c.fillText(bigText, W/2, 400);
+  c.font = '600 38px Manrope, sans-serif';
+  c.fillStyle = '#2dd4bf';
+  c.fillText(bigLabel, W/2, 456);
+
+  let y = rowsStartY;
+  rows.forEach((r) => {
+    c.fillStyle = 'rgba(255,255,255,0.06)';
+    c.fillRect(64, y - 42, W - 128, rowH - 16);
+    c.textAlign = 'left';
+    c.font = '500 30px Manrope, sans-serif';
+    c.fillStyle = '#8b95a8';
+    c.fillText(r.label, 92, y);
+    c.textAlign = 'right';
+    c.font = '700 32px Manrope, sans-serif';
+    c.fillStyle = '#eef2f8';
+    c.fillText(String(r.value), W - 92, y);
+    y += rowH;
+  });
+
+  c.textAlign = 'center';
+  c.font = '400 24px Manrope, sans-serif';
+  c.fillStyle = '#8b95a8';
+  const dateStr = new Date().toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' });
+  c.fillText(dateStr + ' · allenamento a corpo libero seguito con la fotocamera', W/2, H - 48);
+
+  return cv;
+}
+
+// Come shareText, ma prova prima a condividere l'immagine generata da
+// renderShareCard: se il browser non supporta la condivisione di file, la
+// scarica (così resta comunque salvabile/inviabile a mano); se anche
+// generare l'immagine fallisce per qualche motivo, ripiega sulla
+// condivisione testuale già esistente, che ha meno probabilità di rottura.
+async function shareCard(cardOptions, text){
+  try{
+    const cv = await renderShareCard(cardOptions);
+    const blob = await new Promise(resolve => cv.toBlob(resolve, 'image/png'));
+    if(!blob) throw new Error('toBlob ha restituito null');
+    const file = new File([blob], 'formacheck.png', { type: 'image/png' });
+    if(navigator.canShare && navigator.canShare({ files: [file] })){
+      try{ await navigator.share({ files: [file], title: 'FormaCheck', text }); }
+      catch(e){ /* l'utente ha annullato: nessun avviso, è normale */ }
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'formacheck-riepilogo.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    pushFeedback('Immagine del riepilogo scaricata.', true);
+  } catch(e){
+    await shareText(text);
   }
 }
 
