@@ -706,6 +706,21 @@
   .onboarding-dot{ width:6px; height:6px; border-radius:50%; background:var(--line); transition:background .2s var(--ease), transform .2s var(--ease); }
   .onboarding-dot.active{ background:var(--accent); transform:scale(1.4); }
 
+  .history-period-tabs{ display:flex; gap:6px; width:100%; max-width:340px; }
+  .history-period-tab{
+    flex:1; padding:6px 4px; font-size:11.5px; font-family:'Manrope', sans-serif; font-weight:600;
+    color:var(--ink-dim); background:var(--panel-3); border:1px solid var(--line);
+    border-radius:var(--radius-sm); cursor:pointer;
+    transition:color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+  }
+  .history-period-tab:hover{ color:var(--ink); border-color:var(--accent-dim); }
+  .history-period-tab.active{ color:var(--bg); background:var(--accent); border-color:var(--accent); }
+
+  .history-exercise-select{
+    width:100%; max-width:340px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink);
+    border-radius:var(--radius-sm); padding:7px 8px; font-family:'Manrope', sans-serif; font-size:12.5px;
+  }
+
   .history-chart{
     display:flex; align-items:flex-end; gap:5px;
     height:96px; padding:10px 4px 4px;
@@ -722,6 +737,15 @@
   }
   .history-chart-bar.has-data{ background:linear-gradient(180deg, var(--accent), var(--accent-dim)); }
   .history-chart-label{ font-size:9px; color:var(--ink-faint); }
+
+  /* Fila di indicatori di qualità media, allineata sotto le barre di volume:
+     stessa struttura a colonne flessibili (numero colonne e gap identici)
+     così ogni pallino ricade sotto la barra corrispondente senza bisogno di
+     un posizionamento assoluto fragile. */
+  .history-chart-quality-row{ display:none; gap:5px; padding:0 4px; }
+  .history-chart-quality-col{ flex:1; display:flex; justify-content:center; }
+  .history-chart-quality-chip{ width:10px; height:10px; border-radius:3px; background:var(--line); }
+  .history-chart-record{ font-size:11.5px; color:var(--ink-dim); text-align:center; }
 
   /* Isola il report settimanale quando si stampa (o si salva come PDF dal
      dialogo di stampa del browser): nasconde tutto il resto della pagina,
@@ -856,7 +880,17 @@
           <div class="calib-status-note" id="wellnessBadge" style="display:none;"></div>
         </div>
       </div>
+      <div class="history-period-tabs" id="historyPeriodTabs" role="group" aria-label="Periodo del grafico">
+        <button class="history-period-tab" id="historyPeriodW2" data-period="w2" type="button">14 giorni</button>
+        <button class="history-period-tab" id="historyPeriodM3" data-period="m3" type="button">3 mesi</button>
+        <button class="history-period-tab" id="historyPeriodY1" data-period="y1" type="button">12 mesi</button>
+      </div>
+      <select class="history-exercise-select" id="historyExerciseFilter" aria-label="Filtra il grafico per esercizio">
+        <option value="all">Tutti gli esercizi</option>
+      </select>
       <div id="historyChart" style="width:100%; max-width:340px;"></div>
+      <div class="history-chart-quality-row" id="historyChartQualityRow" aria-hidden="true"></div>
+      <div class="history-chart-record" id="historyChartRecord" style="width:100%; max-width:340px;"></div>
       <div id="historyList" style="width:100%; max-width:340px; max-height:36vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
       <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
         <button class="calib-skip" id="weeklyReportBtn">📄 Report settimanale</button>
@@ -1282,6 +1316,10 @@ const wellnessStress = document.getElementById('wellnessStress');
 const wellnessSaveBtn = document.getElementById('wellnessSaveBtn');
 const wellnessBadge = document.getElementById('wellnessBadge');
 const historyChart = document.getElementById('historyChart');
+const historyChartQualityRow = document.getElementById('historyChartQualityRow');
+const historyChartRecord = document.getElementById('historyChartRecord');
+const historyPeriodTabs = document.getElementById('historyPeriodTabs');
+const historyExerciseFilter = document.getElementById('historyExerciseFilter');
 const historyList = document.getElementById('historyList');
 const weeklyReportBtn = document.getElementById('weeklyReportBtn');
 const weeklyReportOverlay = document.getElementById('weeklyReportOverlay');
@@ -3985,6 +4023,19 @@ function getPairThresholdsFor(slot, exerciseKey){
 const HISTORY_STORAGE_KEY = 'formacheck_history_v1';
 const HISTORY_MAX_ENTRIES = 500; // evita che lo storage cresca all'infinito
 
+// Il grafico della cronologia ricorda l'ultimo periodo scelto (14 giorni /
+// 3 mesi / 12 mesi) e il filtro per esercizio, così riaprendo la cronologia
+// non si riparte sempre dalla vista di default.
+const HISTORY_CHART_PERIOD_KEY = 'formacheck_history_chart_period_v1';
+const HISTORY_CHART_EXERCISE_KEY = 'formacheck_history_chart_exercise_v1';
+let historyChartPeriod = 'w2';
+let historyChartExercise = 'all';
+try{
+  const savedPeriod = localStorage.getItem(HISTORY_CHART_PERIOD_KEY);
+  if(savedPeriod === 'w2' || savedPeriod === 'm3' || savedPeriod === 'y1') historyChartPeriod = savedPeriod;
+  historyChartExercise = localStorage.getItem(HISTORY_CHART_EXERCISE_KEY) || 'all';
+} catch(e){ /* storage non disponibile: restano i valori di default */ }
+
 function loadHistory(){
   try{
     const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
@@ -5818,50 +5869,167 @@ function updateRpeSelection(){
 }
 
 // --- cronologia allenamenti (vista) ---
-// Grafico a barre: totale ripetizioni valide per giorno, ultimi 14 giorni
-// (solo esercizi a ripetizioni — quelli a timer non sono comparabili sulla
-// stessa scala, restano visibili solo nell'elenco sotto).
-function renderHistoryChart(){
-  const hist = loadHistory();
-  const days = [];
+// Grafico a barre con tre livelli di zoom (14 giorni a giorni, 3 mesi a
+// settimane, 12 mesi a mesi) e un filtro per esercizio: la vista "Tutti gli
+// esercizi" somma i minuti attivi di allenamento (l'unica unità comune a
+// ripetizioni e tenute a timer), mentre un esercizio specifico mostra la sua
+// unità naturale (ripetizioni valide, o secondi/minuti in tenuta).
+function buildHistoryBuckets(period){
   const now = new Date();
-  for(let i = 13; i >= 0; i--){
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    days.push({ key: d.toDateString(), label: String(d.getDate()).padStart(2, '0'), total: 0 });
+  const buckets = [];
+  if(period === 'm3'){
+    // 12 settimane, dal lunedì della settimana corrente indietro nel tempo.
+    const monday = new Date(now);
+    monday.setHours(0, 0, 0, 0);
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    for(let i = 11; i >= 0; i--){
+      const start = new Date(monday);
+      start.setDate(start.getDate() - i * 7);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 7);
+      const startMs = start.getTime(), endMs = end.getTime();
+      buckets.push({
+        label: String(start.getDate()).padStart(2, '0') + '/' + String(start.getMonth() + 1).padStart(2, '0'),
+        rangeLabel: 'settimana del ' + start.toLocaleDateString('it-IT'),
+        match: (ts) => ts >= startMs && ts < endMs
+      });
+    }
+  } else if(period === 'y1'){
+    const monthNames = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+    for(let i = 11; i >= 0; i--){
+      const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      const startMs = start.getTime(), endMs = end.getTime();
+      buckets.push({
+        label: monthNames[start.getMonth()].slice(0, 3),
+        rangeLabel: monthNames[start.getMonth()] + ' ' + start.getFullYear(),
+        match: (ts) => ts >= startMs && ts < endMs
+      });
+    }
+  } else { // 'w2': 14 giorni singoli
+    for(let i = 13; i >= 0; i--){
+      const d = new Date(now);
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      const dayKey = d.toDateString();
+      buckets.push({
+        label: String(d.getDate()).padStart(2, '0'),
+        rangeLabel: d.toLocaleDateString('it-IT'),
+        match: (ts) => new Date(ts).toDateString() === dayKey
+      });
+    }
   }
-  const dayMap = new Map(days.map(d => [d.key, d]));
+  return buckets.map(b => Object.assign(b, { volume: 0, qualitySum: 0, qualityWeight: 0, avgQuality: null }));
+}
+
+function computeHistoryChartData(period, exerciseKey){
+  const hist = loadHistory().filter(e => exerciseKey === 'all' || e.key === exerciseKey);
+  const buckets = buildHistoryBuckets(period);
+  const exMeta = exerciseKey !== 'all' ? EXERCISES[exerciseKey] : null;
   hist.forEach(e => {
-    if(e.mode !== 'reps') return;
-    const key = new Date(e.ts).toDateString();
-    const d = dayMap.get(key);
-    if(d) d.total += (e.valid || 0);
+    const b = buckets.find(bucket => bucket.match(e.ts));
+    if(!b) return;
+    if(exerciseKey === 'all') b.volume += e.activeMs || 0;
+    else if(exMeta && exMeta.mode === 'reps') b.volume += e.valid || 0;
+    else b.volume += e.seconds || 0;
+    if(e.avgQuality != null){
+      const weight = (e.valid || 0) + (e.invalid || 0) + (e.seconds || 0) || 1;
+      b.qualitySum += e.avgQuality * weight;
+      b.qualityWeight += weight;
+    }
   });
-  const max = Math.max(1, ...days.map(d => d.total));
+  buckets.forEach(b => { b.avgQuality = b.qualityWeight > 0 ? Math.round(b.qualitySum / b.qualityWeight) : null; });
+  return buckets;
+}
+
+function formatHistoryVolume(volume, exerciseKey){
+  if(exerciseKey === 'all') return Math.round(volume / 60000) + ' min attivi';
+  const exMeta = EXERCISES[exerciseKey];
+  if(exMeta && exMeta.mode === 'reps') return volume + (volume === 1 ? ' ripetizione' : ' ripetizioni');
+  return volume >= 60 ? (volume / 60).toFixed(1).replace('.0', '') + ' min' : volume + ' sec';
+}
+
+// Ricostruisce le opzioni del filtro esercizio in base a cosa è davvero
+// presente in cronologia, per non offrire scelte che darebbero sempre un
+// grafico vuoto. Conserva la selezione corrente se è ancora valida.
+function populateHistoryExerciseFilter(){
+  const keysWithData = new Set(loadHistory().map(e => e.key));
+  historyExerciseFilter.innerHTML = '';
+  const allOpt = document.createElement('option');
+  allOpt.value = 'all';
+  allOpt.textContent = 'Tutti gli esercizi';
+  historyExerciseFilter.appendChild(allOpt);
+  Object.keys(EXERCISES).forEach(key => {
+    if(!keysWithData.has(key)) return;
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = EXERCISES[key].label;
+    historyExerciseFilter.appendChild(opt);
+  });
+  if(![...historyExerciseFilter.options].some(o => o.value === historyChartExercise)) historyChartExercise = 'all';
+  historyExerciseFilter.value = historyChartExercise;
+}
+
+function renderHistoryChart(){
+  [...historyPeriodTabs.children].forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.period === historyChartPeriod);
+  });
+
+  const buckets = computeHistoryChartData(historyChartPeriod, historyChartExercise);
+  const max = Math.max(1, ...buckets.map(b => b.volume));
 
   historyChart.innerHTML = '';
   const chart = document.createElement('div');
   chart.className = 'history-chart';
-  days.forEach(d => {
+  buckets.forEach(b => {
     const col = document.createElement('div');
     col.className = 'history-chart-col';
     const bar = document.createElement('div');
-    bar.className = 'history-chart-bar' + (d.total > 0 ? ' has-data' : '');
-    const heightPct = Math.round((d.total / max) * 100);
-    bar.style.height = (d.total > 0 ? Math.max(6, heightPct) : 2) + '%';
-    bar.title = d.total + ' ripetizioni valide';
+    bar.className = 'history-chart-bar' + (b.volume > 0 ? ' has-data' : '');
+    const heightPct = Math.round((b.volume / max) * 100);
+    bar.style.height = (b.volume > 0 ? Math.max(6, heightPct) : 2) + '%';
+    bar.title = formatHistoryVolume(b.volume, historyChartExercise) + (b.avgQuality != null ? ' · qualità ' + b.avgQuality : '') + ' — ' + b.rangeLabel;
     const label = document.createElement('div');
     label.className = 'history-chart-label';
-    label.textContent = d.label;
+    label.textContent = b.label;
     col.appendChild(bar);
     col.appendChild(label);
     chart.appendChild(col);
   });
   historyChart.appendChild(chart);
+
+  // Fila di pallini colorati con la qualità media del periodo, allineata
+  // sotto le barre — solo se c'è almeno un dato di qualità da mostrare.
+  const hasAnyQuality = buckets.some(b => b.avgQuality != null);
+  historyChartQualityRow.style.display = hasAnyQuality ? 'flex' : 'none';
+  historyChartQualityRow.innerHTML = '';
+  if(hasAnyQuality){
+    buckets.forEach(b => {
+      const col = document.createElement('div');
+      col.className = 'history-chart-quality-col';
+      const chip = document.createElement('div');
+      chip.className = 'history-chart-quality-chip';
+      if(b.avgQuality != null){
+        chip.style.background = b.avgQuality >= 80 ? 'var(--ok)' : (b.avgQuality >= 60 ? 'var(--warn)' : 'var(--bad)');
+        chip.title = 'Qualità media: ' + b.avgQuality + ' — ' + b.rangeLabel;
+      }
+      col.appendChild(chip);
+      historyChartQualityRow.appendChild(col);
+    });
+  }
+
+  const withData = buckets.filter(b => b.volume > 0);
+  if(withData.length === 0){
+    historyChartRecord.textContent = '';
+  } else {
+    const best = withData.reduce((a, b) => b.volume > a.volume ? b : a);
+    historyChartRecord.textContent = '🏆 Record del periodo: ' + formatHistoryVolume(best.volume, historyChartExercise) + ' — ' + best.rangeLabel;
+  }
 }
 
 function renderHistory(){
   renderGoalPanel();
+  populateHistoryExerciseFilter();
   renderHistoryChart();
   const rows = aggregateHistory();
   historyList.innerHTML = '';
@@ -6167,6 +6335,18 @@ async function shareCard(cardOptions, text){
 historyBtn.addEventListener('click', () => {
   renderHistory();
   historyOverlay.style.display = 'flex';
+});
+[...historyPeriodTabs.children].forEach(btn => {
+  btn.addEventListener('click', () => {
+    historyChartPeriod = btn.dataset.period;
+    try{ localStorage.setItem(HISTORY_CHART_PERIOD_KEY, historyChartPeriod); } catch(e){ /* storage non disponibile */ }
+    renderHistoryChart();
+  });
+});
+historyExerciseFilter.addEventListener('change', () => {
+  historyChartExercise = historyExerciseFilter.value;
+  try{ localStorage.setItem(HISTORY_CHART_EXERCISE_KEY, historyChartExercise); } catch(e){ /* storage non disponibile */ }
+  renderHistoryChart();
 });
 historyCloseBtn.addEventListener('click', () => {
   historyOverlay.style.display = 'none';
