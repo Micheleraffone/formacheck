@@ -914,6 +914,10 @@
         </div>
         <div class="calib-progress" style="width:220px;"><div class="calib-progress-bar" id="goalProgressBar"></div></div>
         <div id="goalProgressLabel" style="font-size:11.5px; color:var(--ink-dim);"></div>
+
+        <button class="btn" id="reminderToggleBtn" style="width:100%; max-width:280px;">🔔 Promemoria disattivati — tocca per attivare</button>
+        <div class="calib-status-note" id="reminderHint" style="display:none; width:100%; max-width:280px; box-sizing:border-box; text-align:left;"></div>
+
         <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-dim);">
           <span>Peso corporeo, per stimare le calorie</span>
           <input type="number" id="bodyWeightInput" min="30" max="250" placeholder="70" aria-label="Peso corporeo in chilogrammi, per stimare le calorie" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
@@ -1385,6 +1389,8 @@ const streakBadge = document.getElementById('streakBadge');
 const goalWeeklyInput = document.getElementById('goalWeeklyInput');
 const goalProgressBar = document.getElementById('goalProgressBar');
 const goalProgressLabel = document.getElementById('goalProgressLabel');
+const reminderToggleBtn = document.getElementById('reminderToggleBtn');
+const reminderHint = document.getElementById('reminderHint');
 const bodyWeightInput = document.getElementById('bodyWeightInput');
 const caloriesTotalBadge = document.getElementById('caloriesTotalBadge');
 const acwrBadge = document.getElementById('acwrBadge');
@@ -4447,6 +4453,152 @@ function computeWeekCount(){
   return days.size;
 }
 
+// Timestamp dell'ultimo allenamento registrato, o null se la cronologia è
+// vuota (Math.max senza argomenti darebbe -Infinity, non utile qui).
+function lastTrainedTimestamp(){
+  const hist = loadHistory();
+  return hist.length === 0 ? null : hist.reduce((max, e) => Math.max(max, e.ts), 0);
+}
+
+// --- Promemoria e badge sull'icona -------------------------------------
+// Due meccanismi separati, con affidabilità molto diversa, entrambi senza
+// alcun backend:
+// - Badge sull'icona (App Badging API): nessun permesso da chiedere,
+//   silenzioso, ma si aggiorna solo quando questa pagina gira (all'apertura
+//   dell'app, non mentre è chiusa).
+// - Promemoria via notifica: richiede il permesso dell'utente. A app
+//   aperta funziona sempre; a app chiusa, SOLO su browser che supportano
+//   la Periodic Background Sync API (in pratica Chrome/Android, PWA
+//   installata con uso frequente) — il sistema decide se e quando
+//   richiamare il service worker, non c'è alcuna garanzia di orario.
+//   Su tutti gli altri browser (Safari/iOS, Firefox, ecc.) il promemoria
+//   funziona comunque, ma solo quando l'utente riapre l'app.
+const REMINDER_STORAGE_KEY = 'formacheck_reminder_v1';
+const REMINDER_LAST_SHOWN_KEY = 'formacheck_reminder_last_shown_v1';
+const REMINDER_SYNC_TAG = 'training-reminder';
+let reminderEnabled = false;
+try{ reminderEnabled = localStorage.getItem(REMINDER_STORAGE_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
+
+// Aggiorna sia il badge sull'icona sia lo specchio dello stato in
+// IndexedDB che il service worker legge durante un periodicsync (non può
+// leggere localStorage). Va richiamata ogni volta che cambiano obiettivo
+// settimanale, allenamenti di questa settimana, o l'ultima sessione.
+function syncGoalSignals(){
+  const goal = loadGoal();
+  const weekCount = computeWeekCount();
+  const missing = Math.max(0, goal.weeklyTarget - weekCount);
+
+  if('setAppBadge' in navigator){
+    try{
+      if(missing > 0) navigator.setAppBadge(missing).catch(() => {});
+      else navigator.clearAppBadge().catch(() => {});
+    } catch(e){ /* API dichiarata ma non realmente disponibile: nessun problema */ }
+  }
+
+  if('indexedDB' in window){
+    try{
+      const req = indexedDB.open('formacheck-reminder', 1);
+      req.onupgradeneeded = () => { req.result.createObjectStore('state'); };
+      req.onsuccess = () => {
+        const db = req.result;
+        const tx = db.transaction('state', 'readwrite');
+        tx.objectStore('state').put({ weeklyTarget: goal.weeklyTarget, weekCount, lastTrainedTs: lastTrainedTimestamp() }, 'goal');
+        tx.oncomplete = () => db.close();
+      };
+      req.onerror = () => { /* IndexedDB non disponibile: il promemoria in background non funzionerà, il resto sì */ };
+    } catch(e){ /* idem */ }
+  }
+}
+
+async function registerReminderSync(){
+  try{
+    if(!('serviceWorker' in navigator)) return;
+    const reg = await navigator.serviceWorker.ready;
+    if(!('periodicSync' in reg)) return; // non supportato dalla maggior parte dei browser
+    const status = await navigator.permissions.query({ name: 'periodic-background-sync' });
+    if(status.state !== 'granted') return;
+    await reg.periodicSync.register(REMINDER_SYNC_TAG, { minInterval: 12 * 60 * 60 * 1000 });
+  } catch(e){ /* non disponibile: resta comunque il promemoria a app aperta */ }
+}
+async function unregisterReminderSync(){
+  try{
+    if(!('serviceWorker' in navigator)) return;
+    const reg = await navigator.serviceWorker.ready;
+    if(reg.periodicSync) await reg.periodicSync.unregister(REMINDER_SYNC_TAG);
+  } catch(e){ /* nessun problema */ }
+}
+
+function updateReminderBtn(){
+  const badgeNote = "Il numero sull'icona (se l'app è installata) mostra sempre quanti allenamenti mancano questa settimana.";
+  reminderHint.style.display = 'block';
+  if(!('Notification' in window)){
+    reminderToggleBtn.textContent = '🔔 Promemoria non supportati su questo browser';
+    reminderToggleBtn.disabled = true;
+    reminderHint.textContent = badgeNote;
+    return;
+  }
+  reminderToggleBtn.disabled = false;
+  reminderToggleBtn.textContent = reminderEnabled
+    ? '🔔 Promemoria attivi — tocca per disattivare'
+    : '🔔 Promemoria disattivati — tocca per attivare';
+  reminderToggleBtn.classList.toggle('primary', reminderEnabled);
+  let extra = '';
+  if(reminderEnabled){
+    extra = Notification.permission === 'granted'
+      ? " Un promemoria appare quando riapri l'app se sei in ritardo sull'obiettivo, e su alcuni browser (Chrome/Android, app installata) anche mentre è chiusa — non è garantito, dipende dal sistema."
+      : ' Permesso notifiche non concesso: riattivalo dalle impostazioni del browser per riceverli.';
+  }
+  reminderHint.textContent = badgeNote + extra;
+}
+
+reminderToggleBtn.addEventListener('click', async () => {
+  if(!('Notification' in window)) return;
+  if(reminderEnabled){
+    reminderEnabled = false;
+    try{ localStorage.setItem(REMINDER_STORAGE_KEY, '0'); } catch(e){ /* storage non disponibile */ }
+    updateReminderBtn();
+    unregisterReminderSync();
+    return;
+  }
+  let permission = Notification.permission;
+  if(permission === 'default'){
+    try{ permission = await Notification.requestPermission(); } catch(e){ permission = 'denied'; }
+  }
+  reminderEnabled = permission === 'granted';
+  try{ localStorage.setItem(REMINDER_STORAGE_KEY, reminderEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
+  updateReminderBtn();
+  if(reminderEnabled){
+    syncGoalSignals();
+    registerReminderSync();
+    pushFeedback('Promemoria attivati.', true);
+  } else if(permission === 'denied'){
+    pushFeedback('Permesso notifiche negato dal browser.', false);
+  }
+});
+
+// Promemoria "a app aperta": l'unico dei due davvero affidabile su
+// qualunque browser. Al massimo una volta al giorno, solo se sono passati
+// almeno due giorni dall'ultimo allenamento e l'obiettivo settimanale non
+// è ancora raggiunto.
+function maybeShowForegroundReminder(){
+  if(!reminderEnabled || !('Notification' in window) || Notification.permission !== 'granted') return;
+  let lastShown = 0;
+  try{ lastShown = parseInt(localStorage.getItem(REMINDER_LAST_SHOWN_KEY), 10) || 0; } catch(e){ /* storage non disponibile */ }
+  if(new Date(lastShown).toDateString() === new Date().toDateString()) return;
+  const lastTs = lastTrainedTimestamp();
+  const daysSince = lastTs == null ? Infinity : (Date.now() - lastTs) / 86400000;
+  const goal = loadGoal();
+  const missing = Math.max(0, goal.weeklyTarget - computeWeekCount());
+  if(daysSince < 2 || missing <= 0) return;
+  navigator.serviceWorker.ready.then(reg => reg.showNotification('FormaCheck', {
+    body: 'Non ti alleni da un po\' — ti manca' + (missing === 1 ? '' : 'no') + ' ' + missing + (missing === 1 ? ' allenamento' : ' allenamenti') + ' per l\'obiettivo di questa settimana.',
+    icon: 'icon-192.png',
+    tag: REMINDER_SYNC_TAG
+  })).then(() => {
+    try{ localStorage.setItem(REMINDER_LAST_SHOWN_KEY, String(Date.now())); } catch(e){ /* storage non disponibile */ }
+  }).catch(() => { /* service worker non pronto, o notifica rifiutata: nessun problema */ });
+}
+
 function renderGoalPanel(){
   const goal = loadGoal();
   goalWeeklyInput.value = goal.weeklyTarget;
@@ -4470,6 +4622,7 @@ function renderGoalPanel(){
   renderAcwrBadge();
   renderWellnessSection();
   renderDeloadBadge();
+  syncGoalSignals();
 }
 
 // --- Acute:Chronic Workload Ratio (ACWR) ---
@@ -5345,6 +5498,10 @@ planUseBtn.addEventListener('click', () => {
 
 renderPlanCard();
 
+updateReminderBtn();
+syncGoalSignals();
+maybeShowForegroundReminder();
+
 function startButtonLabel(){
   if(appMode === 'circuit') return 'Avvia circuito';
   if(appMode === 'pair') return 'Avvia allenamento in coppia';
@@ -6037,6 +6194,7 @@ function stopSession(){
 
   running = false;
   renderPlanCard(); // torna a proporre un piano ora che si è di nuovo alla schermata di scelta
+  syncGoalSignals(); // la sessione appena finita può aver cambiato il conteggio settimanale
   stopPairMode();
   // Ferma anche una frase vocale ancora in coda o in corso: senza questa
   // riga, a sessione già terminata (fotocamera spenta, schermata tornata
@@ -6738,7 +6896,8 @@ historyClearBtn.addEventListener('click', () => {
 const BACKUP_KEYS = [
   THEME_STORAGE_KEY, CAPTIONS_STORAGE_KEY, VOICE_COMMAND_STORAGE_KEY,
   THRESH_STORAGE_KEY, HISTORY_STORAGE_KEY, GOAL_STORAGE_KEY,
-  WEIGHT_STORAGE_KEY, REF_POSE_ENABLED_KEY, PROGRAMS_STORAGE_KEY
+  WEIGHT_STORAGE_KEY, REF_POSE_ENABLED_KEY, PROGRAMS_STORAGE_KEY,
+  REMINDER_STORAGE_KEY
 ];
 
 function showBackupStatus(msg, ok){
