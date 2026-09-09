@@ -1002,6 +1002,14 @@
       <div id="reactionTrialsList" style="width:100%; max-width:280px; display:flex; flex-direction:column; gap:4px;"></div>
       <button class="calib-skip" id="reactionTestCloseBtn">Interrompi</button>
     </div>
+    <div class="calib-overlay" id="postureCheckOverlay" style="display:none;">
+      <div class="calib-title">🧍 Check-up posturale</div>
+      <div class="calib-hint" id="postureCheckStatus" style="max-width:300px;"></div>
+      <div class="rest-countdown" id="postureCheckCountdown"></div>
+      <div id="postureCheckResults" style="width:100%; max-width:300px; display:none; flex-direction:column; gap:8px;"></div>
+      <div class="calib-hint" style="font-size:11px; opacity:0.75; max-width:280px;">Uno screening informale, non una valutazione clinica: se qualcosa ti sembra fuori norma, parlane con un fisioterapista.</div>
+      <button class="calib-skip" id="postureCheckCloseBtn">Chiudi</button>
+    </div>
     <div class="calib-overlay" id="onboardingOverlay" style="display:none;">
       <div class="calib-title" id="onboardingTitle">Benvenuto</div>
       <div class="calib-hint" id="onboardingText" style="max-width:300px;"></div>
@@ -1219,6 +1227,8 @@
         <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
         <button class="btn" id="reactionTestBtn" style="width:100%;" title="Test del tempo di reazione: un protocollo reale usato nel ritorno allo sport dopo infortunio e nell'allenamento neuromuscolare. Serve la fotocamera già avviata.">⏱️ Test tempo di reazione</button>
         <div class="calib-status-note" id="reactionTestHint">Misura quanto ci metti a reagire a uno stimolo a comparsa casuale: lo stesso tipo di test usato nel ritorno allo sport dopo un infortunio, per valutare la prontezza neuromuscolare. Serve la fotocamera già avviata.</div>
+        <button class="btn" id="postureCheckBtn" style="width:100%;" title="Screening informale di livello spalle, livello bacino e allineamento laterale busto-bacino, in piedi frontale alla fotocamera per pochi secondi. Serve la fotocamera già avviata.">🧍 Check-up posturale</button>
+        <div class="calib-status-note" id="postureCheckHint">Uno screening rapido e informale — non una valutazione clinica — di livello spalle, livello bacino e allineamento laterale, in piedi frontale alla fotocamera per pochi secondi. Serve la fotocamera già avviata.</div>
 
         <div>
           <div class="section-label">Backup dati</div>
@@ -1455,6 +1465,12 @@ const reactionStimulusBox = document.getElementById('reactionStimulusBox');
 const reactionStatus = document.getElementById('reactionStatus');
 const reactionTrialsList = document.getElementById('reactionTrialsList');
 const reactionTestCloseBtn = document.getElementById('reactionTestCloseBtn');
+const postureCheckBtn = document.getElementById('postureCheckBtn');
+const postureCheckOverlay = document.getElementById('postureCheckOverlay');
+const postureCheckStatus = document.getElementById('postureCheckStatus');
+const postureCheckCountdown = document.getElementById('postureCheckCountdown');
+const postureCheckResults = document.getElementById('postureCheckResults');
+const postureCheckCloseBtn = document.getElementById('postureCheckCloseBtn');
 const historyExportBtn = document.getElementById('historyExportBtn');
 const historyClearBtn = document.getElementById('historyClearBtn');
 const historyCloseBtn = document.getElementById('historyCloseBtn');
@@ -6203,6 +6219,153 @@ function stopReactionTest(){
 reactionTestBtn.addEventListener('click', startReactionTest);
 reactionTestCloseBtn.addEventListener('click', stopReactionTest);
 
+// --- Check-up posturale (screening informale, non clinico) -------------
+// Modalità standalone come il test di reazione: non è legata a un
+// esercizio, serve solo che la fotocamera sia già avviata. In piedi,
+// frontale alla fotocamera, per pochi secondi controlla tre cose che un
+// fisioterapista guarderebbe per prime in una valutazione posturale
+// informale — livello delle spalle, livello del bacino, e se l'asse
+// busto-bacino è verticale o spostato lateralmente — usando solo i
+// landmark già forniti dal modello di posa, nessuna nuova rilevazione.
+// Deliberatamente prudente nel linguaggio (mai diagnostico) e con un
+// promemoria esplicito che non sostituisce una valutazione vera.
+const POSTURE_CHECK_COUNTDOWN_S = 3;
+const POSTURE_CHECK_SAMPLE_MS = 2500;
+const POSTURE_CHECK_HISTORY_KEY = 'formacheck_posture_check_v1';
+let postureCheckActive = false;
+let postureCheckPhase = 'idle'; // 'countdown' | 'sampling' | 'done'
+let postureCheckTimerId = null;
+let postureCheckSamples = [];
+
+function postureCheckTick(lm){
+  if(postureCheckPhase !== 'sampling') return;
+  const lSh = lm[11], rSh = lm[12], lHip = lm[23], rHip = lm[24];
+  if(!lSh || !rSh || !lHip || !rHip) return;
+  const shoulderWidth = Math.abs(lSh.x - rSh.x) || 0.01;
+  const hipWidth = Math.abs(lHip.x - rHip.x) || 0.01;
+  postureCheckSamples.push({
+    // positivo = lato destro più in basso nell'immagine (y cresce verso il basso)
+    shoulderDiff: (rSh.y - lSh.y) / shoulderWidth,
+    hipDiff: (rHip.y - lHip.y) / hipWidth,
+    // positivo = centro spalle spostato a destra rispetto al centro bacino
+    leanDiff: ((lSh.x + rSh.x) / 2 - (lHip.x + rHip.x) / 2) / shoulderWidth
+  });
+}
+
+function postureCheckTier(absVal){
+  if(absVal < 0.08) return 'ok';
+  if(absVal < 0.18) return 'warn';
+  return 'bad';
+}
+function postureCheckTierColor(tier){
+  return tier === 'ok' ? 'var(--ok)' : tier === 'warn' ? 'var(--warn)' : 'var(--bad)';
+}
+function postureCheckTierIcon(tier){
+  return tier === 'ok' ? '🟢' : tier === 'warn' ? '🟡' : '🔴';
+}
+
+function loadPostureCheckHistory(){
+  try{ return JSON.parse(localStorage.getItem(POSTURE_CHECK_HISTORY_KEY) || '[]'); } catch(e){ return []; }
+}
+function savePostureCheckResult(entry){
+  try{
+    const all = loadPostureCheckHistory();
+    all.push(entry);
+    const trimmed = all.length > 50 ? all.slice(all.length - 50) : all;
+    localStorage.setItem(POSTURE_CHECK_HISTORY_KEY, JSON.stringify(trimmed));
+  } catch(e){ /* storage non disponibile */ }
+}
+
+function renderPostureCheckResult(result){
+  const shTier = postureCheckTier(Math.abs(result.shoulderDiff));
+  const shSide = result.shoulderDiff > 0 ? 'destra' : 'sinistra';
+  const hipTier = postureCheckTier(Math.abs(result.hipDiff));
+  const hipSide = result.hipDiff > 0 ? 'destra' : 'sinistra';
+  const leanTier = postureCheckTier(Math.abs(result.leanDiff));
+  const leanSide = result.leanDiff > 0 ? 'destra' : 'sinistra';
+  const degree = (tier) => tier === 'warn' ? 'leggermente' : 'visibilmente';
+
+  const rows = [
+    { tier: shTier, text: shTier === 'ok' ? 'Spalle: livello quasi uguale tra i due lati.' : 'Spalle: la spalla ' + shSide + ' è ' + degree(shTier) + ' più bassa.' },
+    { tier: hipTier, text: hipTier === 'ok' ? 'Bacino: livello quasi uguale tra i due lati.' : 'Bacino: il lato ' + hipSide + ' è ' + degree(hipTier) + ' più basso.' },
+    { tier: leanTier, text: leanTier === 'ok' ? 'Asse busto-bacino: verticale, ben allineato.' : 'Asse busto-bacino: ' + degree(leanTier) + ' spostato verso ' + leanSide + '.' }
+  ];
+
+  postureCheckResults.innerHTML = '';
+  rows.forEach(row => {
+    const div = document.createElement('div');
+    div.className = 'calib-status-note';
+    div.style.color = postureCheckTierColor(row.tier);
+    div.style.textAlign = 'left';
+    div.textContent = postureCheckTierIcon(row.tier) + ' ' + row.text;
+    postureCheckResults.appendChild(div);
+  });
+  postureCheckResults.style.display = 'flex';
+  postureCheckStatus.textContent = 'Check-up completato.';
+  postureCheckCountdown.textContent = '';
+}
+
+function finishPostureCheck(){
+  postureCheckPhase = 'done';
+  if(postureCheckSamples.length < 5){
+    postureCheckStatus.textContent = 'Non è stato possibile leggere una posizione stabile: assicurati di essere ben visibile per intero e riprova.';
+    postureCheckCountdown.textContent = '';
+    postureCheckActive = false;
+    return;
+  }
+  const avg = (key) => postureCheckSamples.reduce((sum, s) => sum + s[key], 0) / postureCheckSamples.length;
+  const result = { shoulderDiff: avg('shoulderDiff'), hipDiff: avg('hipDiff'), leanDiff: avg('leanDiff') };
+  renderPostureCheckResult(result);
+  savePostureCheckResult(Object.assign({ ts: Date.now() }, result));
+  postureCheckActive = false;
+}
+
+function beginPostureSampling(){
+  postureCheckPhase = 'sampling';
+  postureCheckSamples = [];
+  postureCheckStatus.textContent = 'Resta fermo…';
+  postureCheckCountdown.textContent = '';
+  speak('Resta fermo.');
+  postureCheckTimerId = setTimeout(finishPostureCheck, POSTURE_CHECK_SAMPLE_MS);
+}
+
+function startPostureCheck(){
+  if(!running){
+    pushFeedback('Avvia prima la fotocamera per il check-up posturale.', false);
+    return;
+  }
+  postureCheckActive = true;
+  postureCheckPhase = 'countdown';
+  postureCheckSamples = [];
+  postureCheckResults.style.display = 'none';
+  postureCheckStatus.textContent = 'Mettiti in piedi, frontale alla fotocamera, braccia rilassate lungo i fianchi.';
+  speak('Mettiti in piedi, frontale alla fotocamera, braccia rilassate.');
+  let remaining = POSTURE_CHECK_COUNTDOWN_S;
+  postureCheckCountdown.textContent = remaining;
+  postureCheckOverlay.style.display = 'flex';
+  clearInterval(postureCheckTimerId);
+  postureCheckTimerId = setInterval(() => {
+    remaining--;
+    postureCheckCountdown.textContent = Math.max(0, remaining);
+    if(remaining > 0) speak(String(remaining));
+    if(remaining <= 0){
+      clearInterval(postureCheckTimerId);
+      beginPostureSampling();
+    }
+  }, 1000);
+}
+
+function stopPostureCheck(){
+  postureCheckActive = false;
+  postureCheckPhase = 'idle';
+  clearInterval(postureCheckTimerId);
+  clearTimeout(postureCheckTimerId);
+  postureCheckOverlay.style.display = 'none';
+}
+
+postureCheckBtn.addEventListener('click', startPostureCheck);
+postureCheckCloseBtn.addEventListener('click', stopPostureCheck);
+
 repGoalInput.addEventListener('change', () => {
   const val = Math.max(1, parseInt(repGoalInput.value, 10) || 1);
   repGoalInput.value = val;
@@ -6348,6 +6511,7 @@ function stopSession(){
   pairCalibPendingSlot = null;
   calibTargetSlot = null;
   if(reactionTestActive) stopReactionTest(); // la fotocamera si sta fermando: non ha senso lasciare il test in corso
+  if(postureCheckActive) stopPostureCheck(); // idem per il check-up posturale
 
 
   clearInterval(restIntervalId);
@@ -7909,6 +8073,11 @@ function renderLoop(){
 
   if(reactionTestActive){
     reactionTestTick();
+    return;
+  }
+
+  if(postureCheckActive){
+    postureCheckTick(lm);
     return;
   }
 
