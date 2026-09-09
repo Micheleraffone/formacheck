@@ -706,6 +706,21 @@
   .onboarding-dot{ width:6px; height:6px; border-radius:50%; background:var(--line); transition:background .2s var(--ease), transform .2s var(--ease); }
   .onboarding-dot.active{ background:var(--accent); transform:scale(1.4); }
 
+  .history-period-tabs{ display:flex; gap:6px; width:100%; max-width:340px; }
+  .history-period-tab{
+    flex:1; padding:6px 4px; font-size:11.5px; font-family:'Manrope', sans-serif; font-weight:600;
+    color:var(--ink-dim); background:var(--panel-3); border:1px solid var(--line);
+    border-radius:var(--radius-sm); cursor:pointer;
+    transition:color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+  }
+  .history-period-tab:hover{ color:var(--ink); border-color:var(--accent-dim); }
+  .history-period-tab.active{ color:var(--bg); background:var(--accent); border-color:var(--accent); }
+
+  .history-exercise-select{
+    width:100%; max-width:340px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink);
+    border-radius:var(--radius-sm); padding:7px 8px; font-family:'Manrope', sans-serif; font-size:12.5px;
+  }
+
   .history-chart{
     display:flex; align-items:flex-end; gap:5px;
     height:96px; padding:10px 4px 4px;
@@ -722,6 +737,15 @@
   }
   .history-chart-bar.has-data{ background:linear-gradient(180deg, var(--accent), var(--accent-dim)); }
   .history-chart-label{ font-size:9px; color:var(--ink-faint); }
+
+  /* Fila di indicatori di qualità media, allineata sotto le barre di volume:
+     stessa struttura a colonne flessibili (numero colonne e gap identici)
+     così ogni pallino ricade sotto la barra corrispondente senza bisogno di
+     un posizionamento assoluto fragile. */
+  .history-chart-quality-row{ display:none; gap:5px; padding:0 4px; }
+  .history-chart-quality-col{ flex:1; display:flex; justify-content:center; }
+  .history-chart-quality-chip{ width:10px; height:10px; border-radius:3px; background:var(--line); }
+  .history-chart-record{ font-size:11.5px; color:var(--ink-dim); text-align:center; }
 
   /* Isola il report settimanale quando si stampa (o si salva come PDF dal
      dialogo di stampa del browser): nasconde tutto il resto della pagina,
@@ -743,7 +767,7 @@
 <header>
   <div style="display:flex; align-items:center; gap:12px;">
     <div class="brand">Forma<span>Check</span></div>
-    <button class="theme-toggle-btn" id="themeToggleBtn" title="Passa al tema chiaro"></button>
+    <button class="theme-toggle-btn" id="themeToggleBtn" title="Passa al tema chiaro" aria-label="Passa al tema chiaro"></button>
   </div>
   <div class="tagline">Prototipo didattico — non sostituisce la valutazione di un personal trainer o fisioterapista qualificato. Il rilevamento funziona meglio con buona illuminazione, inquadratura laterale e corpo intero visibile.</div>
 </header>
@@ -765,7 +789,7 @@
     <canvas id="pipCanvas" width="320" height="200" style="position:fixed; left:-9999px; top:0; width:320px; height:200px;"></canvas>
     <video id="pipVideo" muted playsinline style="position:fixed; left:-9999px; top:0; width:320px; height:200px;"></video>
     <div class="stage-badge" id="fpsBadge">— fps</div>
-    <button class="expand-btn" id="expandBtn" title="Ingrandisci l'inquadratura">⤢</button>
+    <button class="expand-btn" id="expandBtn" title="Ingrandisci l'inquadratura" aria-label="Ingrandisci l'inquadratura">⤢</button>
     <div class="loading-overlay" id="loadingOverlay" style="display:none;">
       Caricamento modello di pose estimation…<br>può richiedere qualche secondo
     </div>
@@ -828,13 +852,13 @@
         <div id="streakBadge" style="font-family:'Manrope', sans-serif; font-weight:700; font-size:15px;">🔥 0 giorni di fila</div>
         <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-dim);">
           <span>Obiettivo: allenamenti a settimana</span>
-          <input type="number" id="goalWeeklyInput" min="1" max="14" value="3" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+          <input type="number" id="goalWeeklyInput" min="1" max="14" value="3" aria-label="Obiettivo: allenamenti a settimana" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
         </div>
         <div class="calib-progress" style="width:220px;"><div class="calib-progress-bar" id="goalProgressBar"></div></div>
         <div id="goalProgressLabel" style="font-size:11.5px; color:var(--ink-dim);"></div>
         <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-dim);">
           <span>Peso corporeo, per stimare le calorie</span>
-          <input type="number" id="bodyWeightInput" min="30" max="250" placeholder="70" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+          <input type="number" id="bodyWeightInput" min="30" max="250" placeholder="70" aria-label="Peso corporeo in chilogrammi, per stimare le calorie" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
           <span>kg</span>
         </div>
         <div id="caloriesTotalBadge" class="calib-status-note" style="display:none;"></div>
@@ -844,19 +868,29 @@
           <div class="section-label">Benessere di oggi (Hooper Index) — 1 ottimo, 7 pessimo</div>
           <div style="display:grid; grid-template-columns:1fr auto; gap:6px 10px; width:100%; font-size:12px; color:var(--ink-dim); align-items:center;">
             <span>Affaticamento</span>
-            <input type="number" id="wellnessFatigue" min="1" max="7" value="4" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+            <input type="number" id="wellnessFatigue" min="1" max="7" value="4" aria-label="Affaticamento, da 1 (ottimo) a 7 (pessimo)" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
             <span>Qualità del sonno (7 = ha dormito male)</span>
-            <input type="number" id="wellnessSleep" min="1" max="7" value="4" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+            <input type="number" id="wellnessSleep" min="1" max="7" value="4" aria-label="Qualità del sonno, da 1 a 7, 7 vuol dire ha dormito male" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
             <span>Dolori muscolari</span>
-            <input type="number" id="wellnessSoreness" min="1" max="7" value="4" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+            <input type="number" id="wellnessSoreness" min="1" max="7" value="4" aria-label="Dolori muscolari, da 1 (nessuno) a 7 (molti)" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
             <span>Stress</span>
-            <input type="number" id="wellnessStress" min="1" max="7" value="4" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+            <input type="number" id="wellnessStress" min="1" max="7" value="4" aria-label="Stress, da 1 (nessuno) a 7 (molto)" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
           </div>
           <button class="calib-skip" id="wellnessSaveBtn">Salva benessere di oggi</button>
           <div class="calib-status-note" id="wellnessBadge" style="display:none;"></div>
         </div>
       </div>
+      <div class="history-period-tabs" id="historyPeriodTabs" role="group" aria-label="Periodo del grafico">
+        <button class="history-period-tab" id="historyPeriodW2" data-period="w2" type="button">14 giorni</button>
+        <button class="history-period-tab" id="historyPeriodM3" data-period="m3" type="button">3 mesi</button>
+        <button class="history-period-tab" id="historyPeriodY1" data-period="y1" type="button">12 mesi</button>
+      </div>
+      <select class="history-exercise-select" id="historyExerciseFilter" aria-label="Filtra il grafico per esercizio">
+        <option value="all">Tutti gli esercizi</option>
+      </select>
       <div id="historyChart" style="width:100%; max-width:340px;"></div>
+      <div class="history-chart-quality-row" id="historyChartQualityRow" aria-hidden="true"></div>
+      <div class="history-chart-record" id="historyChartRecord" style="width:100%; max-width:340px;"></div>
       <div id="historyList" style="width:100%; max-width:340px; max-height:36vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
       <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
         <button class="calib-skip" id="weeklyReportBtn">📄 Report settimanale</button>
@@ -936,11 +970,11 @@
 
     <div id="repGoalRow" style="display:none; align-items:center; justify-content:center; gap:8px; font-size:11.5px; color:var(--ink-dim); padding-bottom:4px; flex-wrap:wrap;">
       <span>Traguardo</span>
-      <input type="number" id="repGoalInput" min="1" value="10" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
+      <input type="number" id="repGoalInput" min="1" value="10" aria-label="Traguardo ripetizioni o secondi" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
       <span id="repGoalUnit">ripetizioni</span>
       <span style="opacity:.5;">·</span>
       <span id="setsGoalUnit">serie</span>
-      <input type="number" id="setsGoalInput" min="1" value="1" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
+      <input type="number" id="setsGoalInput" min="1" value="1" aria-label="Numero di serie" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
     </div>
     <div class="calib-status-note" id="setBadge" style="display:none; text-align:center;"></div>
 
@@ -958,7 +992,7 @@
     <div class="howto-panel">
       <button class="howto-toggle" id="howtoToggle" aria-expanded="false">
         <span>Come si esegue</span>
-        <span class="howto-chevron" id="howtoChevron">▾</span>
+        <span class="howto-chevron" id="howtoChevron" aria-hidden="true">▾</span>
       </button>
       <ol class="howto-list" id="howtoList" hidden></ol>
     </div>
@@ -966,7 +1000,7 @@
     <div class="muscle-panel">
       <div class="section-label">Muscoli coinvolti</div>
       <div class="muscle-figure-wrap">
-        <svg class="muscle-figure" id="muscleFigure" viewBox="0 0 140 300" xmlns="http://www.w3.org/2000/svg">
+        <svg class="muscle-figure" id="muscleFigure" viewBox="0 0 140 300" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <circle class="muscle-static" cx="70" cy="22" r="16"/>
           <rect class="muscle-static" x="64" y="35" width="12" height="12"/>
           <rect class="muscle-region" data-region="shoulders" x="38" y="46" width="64" height="14" rx="7"/>
@@ -1021,7 +1055,7 @@
     <div class="settings-group">
       <button class="settings-group-toggle" id="advancedTrainingToggle" aria-expanded="false">
         <span>⚙️ Allenamento avanzato</span>
-        <span class="settings-group-chevron" id="advancedTrainingChevron">▾</span>
+        <span class="settings-group-chevron" id="advancedTrainingChevron" aria-hidden="true">▾</span>
       </button>
       <div class="settings-group-body" id="advancedTrainingBody" hidden>
         <button class="btn" id="apreBtn" style="width:100%; display:none;">🎯 Autoregolazione APRE disattivata — tocca per attivare</button>
@@ -1029,9 +1063,9 @@
         <button class="btn" id="clusterBtn" style="width:100%; display:none;">🔄 Cluster set disattivato — tocca per attivare</button>
         <div id="clusterConfigRow" style="display:none; align-items:center; justify-content:center; gap:8px; font-size:11.5px; color:var(--ink-dim); padding:6px 0;">
           <span>Ogni</span>
-          <input type="number" id="clusterSizeInput" min="1" value="2" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
+          <input type="number" id="clusterSizeInput" min="1" value="2" aria-label="Ogni quante ripetizioni fare una pausa nel cluster set" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
           <span>rip. pausa di</span>
-          <input type="number" id="clusterRestInput" min="5" value="15" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
+          <input type="number" id="clusterRestInput" min="5" value="15" aria-label="Durata della pausa cluster in secondi" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
           <span>s</span>
         </div>
         <div class="calib-status-note" id="clusterHint" style="display:none;">Suddivide la serie in mini-blocchi con una breve pausa tra uno e l'altro, invece di ripetizioni continue: aiuta a mantenere la potenza alta invece di lasciarla calare per la fatica, come nel "cluster training" usato nell'allenamento della forza esplosiva.</div>
@@ -1052,7 +1086,7 @@
     <div class="settings-group">
       <button class="settings-group-toggle" id="voiceAccessibilityToggle" aria-expanded="false">
         <span>🔈 Vocale e accessibilità</span>
-        <span class="settings-group-chevron" id="voiceAccessibilityChevron">▾</span>
+        <span class="settings-group-chevron" id="voiceAccessibilityChevron" aria-hidden="true">▾</span>
       </button>
       <div class="settings-group-body" id="voiceAccessibilityBody" hidden>
         <div>
@@ -1076,7 +1110,7 @@
     <div class="settings-group">
       <button class="settings-group-toggle" id="historyDataToggle" aria-expanded="false">
         <span>📊 Cronologia e dati</span>
-        <span class="settings-group-chevron" id="historyDataChevron">▾</span>
+        <span class="settings-group-chevron" id="historyDataChevron" aria-hidden="true">▾</span>
       </button>
       <div class="settings-group-body" id="historyDataBody" hidden>
         <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
@@ -1144,7 +1178,7 @@
 
     <div>
       <div class="section-label">Feedback</div>
-      <div class="feedback-list" id="feedbackList">
+      <div class="feedback-list" id="feedbackList" aria-live="polite">
         <div class="fb-item">Avvia la fotocamera e posizionati di lato all'inquadratura, a figura intera.</div>
       </div>
     </div>
@@ -1282,6 +1316,10 @@ const wellnessStress = document.getElementById('wellnessStress');
 const wellnessSaveBtn = document.getElementById('wellnessSaveBtn');
 const wellnessBadge = document.getElementById('wellnessBadge');
 const historyChart = document.getElementById('historyChart');
+const historyChartQualityRow = document.getElementById('historyChartQualityRow');
+const historyChartRecord = document.getElementById('historyChartRecord');
+const historyPeriodTabs = document.getElementById('historyPeriodTabs');
+const historyExerciseFilter = document.getElementById('historyExerciseFilter');
 const historyList = document.getElementById('historyList');
 const weeklyReportBtn = document.getElementById('weeklyReportBtn');
 const weeklyReportOverlay = document.getElementById('weeklyReportOverlay');
@@ -1349,7 +1387,9 @@ function saveTheme(theme){
 function applyTheme(theme){
   document.documentElement.setAttribute('data-theme', theme);
   themeToggleBtn.innerHTML = theme === 'light' ? ICONS.moon : ICONS.sun;
-  themeToggleBtn.title = theme === 'light' ? 'Passa al tema scuro' : 'Passa al tema chiaro';
+  const label = theme === 'light' ? 'Passa al tema scuro' : 'Passa al tema chiaro';
+  themeToggleBtn.title = label;
+  themeToggleBtn.setAttribute('aria-label', label); // pulsante a sola icona: senza, chi usa un lettore di schermo non saprebbe cosa fa
 }
 let currentTheme = loadTheme();
 applyTheme(currentTheme);
@@ -3983,6 +4023,19 @@ function getPairThresholdsFor(slot, exerciseKey){
 const HISTORY_STORAGE_KEY = 'formacheck_history_v1';
 const HISTORY_MAX_ENTRIES = 500; // evita che lo storage cresca all'infinito
 
+// Il grafico della cronologia ricorda l'ultimo periodo scelto (14 giorni /
+// 3 mesi / 12 mesi) e il filtro per esercizio, così riaprendo la cronologia
+// non si riparte sempre dalla vista di default.
+const HISTORY_CHART_PERIOD_KEY = 'formacheck_history_chart_period_v1';
+const HISTORY_CHART_EXERCISE_KEY = 'formacheck_history_chart_exercise_v1';
+let historyChartPeriod = 'w2';
+let historyChartExercise = 'all';
+try{
+  const savedPeriod = localStorage.getItem(HISTORY_CHART_PERIOD_KEY);
+  if(savedPeriod === 'w2' || savedPeriod === 'm3' || savedPeriod === 'y1') historyChartPeriod = savedPeriod;
+  historyChartExercise = localStorage.getItem(HISTORY_CHART_EXERCISE_KEY) || 'all';
+} catch(e){ /* storage non disponibile: restano i valori di default */ }
+
 function loadHistory(){
   try{
     const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
@@ -4854,7 +4907,7 @@ function buildCircuitList(){
     row.innerHTML =
       '<input type="checkbox" id="circ_' + key + '" data-key="' + key + '">' +
       '<label for="circ_' + key + '">' + ex.label + '</label>' +
-      '<input type="number" min="1" value="' + defaultTarget + '" id="circtarget_' + key + '">' +
+      '<input type="number" min="1" value="' + defaultTarget + '" id="circtarget_' + key + '" aria-label="Obiettivo per ' + ex.label + ' in ' + (ex.mode === 'reps' ? 'ripetizioni' : 'secondi') + '">' +
       '<span class="unit">' + (ex.mode === 'reps' ? 'reps' : 'sec') + '</span>';
     circuitListEl.appendChild(row);
   });
@@ -5044,6 +5097,7 @@ function finishCircuit(){
   circuitSummaryList.innerHTML = '';
   let summaryText = '💪 FormaCheck — Circuito completato\n';
   let totalKcal = 0;
+  const cardRows = []; // stessi dati delle righe a schermo, per la scheda-immagine condivisibile
   circuitResults.forEach(r => {
     const row = document.createElement('div');
     row.className = 'circuit-summary-row';
@@ -5051,6 +5105,7 @@ function finishCircuit(){
     row.innerHTML = '<span>' + r.label + '</span><span>' + r.achieved + ' / ' + r.target + ' ' + r.unit + invalidNote + '</span>';
     circuitSummaryList.appendChild(row);
     summaryText += '• ' + r.label + ': ' + r.achieved + '/' + r.target + ' ' + r.unit + (r.invalid > 0 ? ' (' + r.invalid + ' scartate)' : '') + '\n';
+    cardRows.push({ label: r.label, value: r.achieved + '/' + r.target + ' ' + r.unit });
     totalKcal += r.kcal || 0;
   });
   if(totalKcal >= 1){
@@ -5059,9 +5114,10 @@ function finishCircuit(){
     kcalRow.innerHTML = '<span>Calorie stimate</span><span>~' + Math.round(totalKcal) + ' kcal</span>';
     circuitSummaryList.appendChild(kcalRow);
     summaryText += '~' + Math.round(totalKcal) + ' kcal stimate\n';
+    cardRows.push({ label: 'Calorie stimate', value: '~' + Math.round(totalKcal) + ' kcal' });
   }
   circuitSummaryOverlay.style.display = 'flex';
-  circuitSummaryShareBtn.onclick = () => shareText(summaryText);
+  circuitSummaryShareBtn.onclick = () => shareCard({ heading: 'Circuito completato', big: circuitResults.length, bigLabel: circuitResults.length === 1 ? 'esercizio completato' : 'esercizi completati', rows: cardRows }, summaryText);
   if(voiceEnabled) speak('Circuito completato, ottimo lavoro.');
   hapticCelebrate();
 }
@@ -5204,9 +5260,11 @@ function updateGoalUI(){
   if(ex.mode === 'reps'){
     repGoalInput.value = repGoal;
     repGoalUnit.textContent = 'ripetizioni';
+    repGoalInput.setAttribute('aria-label', 'Traguardo ripetizioni');
   } else {
     repGoalInput.value = timerGoalSeconds;
     repGoalUnit.textContent = 'secondi';
+    repGoalInput.setAttribute('aria-label', 'Traguardo secondi');
   }
   setsGoalInput.value = setsGoal;
   singleRestPresetWrap.style.display = setsGoal > 1 ? 'block' : 'none';
@@ -5691,19 +5749,33 @@ resetBtn.addEventListener('click', () => {
 function showSessionSummary(onClose){
   const ex = EXERCISES[currentExercise];
   sessionSummaryBody.innerHTML = '';
+  const cardRows = []; // stessi dati delle righe a schermo, per la scheda-immagine condivisibile
 
   const addRow = (label, value) => {
     const row = document.createElement('div');
     row.className = 'circuit-summary-row';
     row.innerHTML = '<span>' + label + '</span><span>' + value + '</span>';
     sessionSummaryBody.appendChild(row);
+    cardRows.push({ label, value });
   };
+  // "Esercizio" resta solo a schermo (nel DOM): sulla scheda-immagine
+  // condivisibile il nome dell'esercizio è già il titolo in alto, ripeterlo
+  // anche come prima riga di statistica sarebbe ridondante.
+  const addScreenOnlyRow = (label, value) => {
+    const row = document.createElement('div');
+    row.className = 'circuit-summary-row';
+    row.innerHTML = '<span>' + label + '</span><span>' + value + '</span>';
+    sessionSummaryBody.appendChild(row);
+  };
+  addScreenOnlyRow('Esercizio', ex.label);
 
-  addRow('Esercizio', ex.label);
+  let cardBig, cardBigLabel;
   let summaryText = '💪 FormaCheck — ' + ex.label + '\n';
   if(ex.mode === 'reps'){
     const total = repCount + invalidRepCount;
     const accuracy = total > 0 ? Math.round((repCount / total) * 100) : null;
+    cardBig = repCount;
+    cardBigLabel = 'ripetizioni valide';
     addRow('Ripetizioni valide', repCount);
     addRow('Ripetizioni scartate', invalidRepCount);
     if(accuracy != null) addRow('Precisione', accuracy + '%');
@@ -5712,6 +5784,8 @@ function showSessionSummary(onClose){
     if(accuracy != null) summaryText += ' (' + accuracy + '% di precisione)';
   } else {
     const timeStr = formatRestTime(Math.round(timerSeconds));
+    cardBig = timeStr;
+    cardBigLabel = 'in tenuta corretta';
     addRow('Tempo in tenuta corretta', timeStr);
     summaryText += timeStr + ' in tenuta corretta';
   }
@@ -5754,7 +5828,7 @@ function showSessionSummary(onClose){
   updateRpeSelection();
 
   sessionSummaryOverlay.style.display = 'flex';
-  sessionSummaryShareBtn.onclick = () => shareText(summaryText);
+  sessionSummaryShareBtn.onclick = () => shareCard({ heading: ex.label, big: cardBig, bigLabel: cardBigLabel, rows: cardRows }, summaryText);
   sessionSummaryCloseBtn.onclick = () => {
     sessionSummaryOverlay.style.display = 'none';
     onClose();
@@ -5795,50 +5869,167 @@ function updateRpeSelection(){
 }
 
 // --- cronologia allenamenti (vista) ---
-// Grafico a barre: totale ripetizioni valide per giorno, ultimi 14 giorni
-// (solo esercizi a ripetizioni — quelli a timer non sono comparabili sulla
-// stessa scala, restano visibili solo nell'elenco sotto).
-function renderHistoryChart(){
-  const hist = loadHistory();
-  const days = [];
+// Grafico a barre con tre livelli di zoom (14 giorni a giorni, 3 mesi a
+// settimane, 12 mesi a mesi) e un filtro per esercizio: la vista "Tutti gli
+// esercizi" somma i minuti attivi di allenamento (l'unica unità comune a
+// ripetizioni e tenute a timer), mentre un esercizio specifico mostra la sua
+// unità naturale (ripetizioni valide, o secondi/minuti in tenuta).
+function buildHistoryBuckets(period){
   const now = new Date();
-  for(let i = 13; i >= 0; i--){
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    days.push({ key: d.toDateString(), label: String(d.getDate()).padStart(2, '0'), total: 0 });
+  const buckets = [];
+  if(period === 'm3'){
+    // 12 settimane, dal lunedì della settimana corrente indietro nel tempo.
+    const monday = new Date(now);
+    monday.setHours(0, 0, 0, 0);
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    for(let i = 11; i >= 0; i--){
+      const start = new Date(monday);
+      start.setDate(start.getDate() - i * 7);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 7);
+      const startMs = start.getTime(), endMs = end.getTime();
+      buckets.push({
+        label: String(start.getDate()).padStart(2, '0') + '/' + String(start.getMonth() + 1).padStart(2, '0'),
+        rangeLabel: 'settimana del ' + start.toLocaleDateString('it-IT'),
+        match: (ts) => ts >= startMs && ts < endMs
+      });
+    }
+  } else if(period === 'y1'){
+    const monthNames = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+    for(let i = 11; i >= 0; i--){
+      const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      const startMs = start.getTime(), endMs = end.getTime();
+      buckets.push({
+        label: monthNames[start.getMonth()].slice(0, 3),
+        rangeLabel: monthNames[start.getMonth()] + ' ' + start.getFullYear(),
+        match: (ts) => ts >= startMs && ts < endMs
+      });
+    }
+  } else { // 'w2': 14 giorni singoli
+    for(let i = 13; i >= 0; i--){
+      const d = new Date(now);
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      const dayKey = d.toDateString();
+      buckets.push({
+        label: String(d.getDate()).padStart(2, '0'),
+        rangeLabel: d.toLocaleDateString('it-IT'),
+        match: (ts) => new Date(ts).toDateString() === dayKey
+      });
+    }
   }
-  const dayMap = new Map(days.map(d => [d.key, d]));
+  return buckets.map(b => Object.assign(b, { volume: 0, qualitySum: 0, qualityWeight: 0, avgQuality: null }));
+}
+
+function computeHistoryChartData(period, exerciseKey){
+  const hist = loadHistory().filter(e => exerciseKey === 'all' || e.key === exerciseKey);
+  const buckets = buildHistoryBuckets(period);
+  const exMeta = exerciseKey !== 'all' ? EXERCISES[exerciseKey] : null;
   hist.forEach(e => {
-    if(e.mode !== 'reps') return;
-    const key = new Date(e.ts).toDateString();
-    const d = dayMap.get(key);
-    if(d) d.total += (e.valid || 0);
+    const b = buckets.find(bucket => bucket.match(e.ts));
+    if(!b) return;
+    if(exerciseKey === 'all') b.volume += e.activeMs || 0;
+    else if(exMeta && exMeta.mode === 'reps') b.volume += e.valid || 0;
+    else b.volume += e.seconds || 0;
+    if(e.avgQuality != null){
+      const weight = (e.valid || 0) + (e.invalid || 0) + (e.seconds || 0) || 1;
+      b.qualitySum += e.avgQuality * weight;
+      b.qualityWeight += weight;
+    }
   });
-  const max = Math.max(1, ...days.map(d => d.total));
+  buckets.forEach(b => { b.avgQuality = b.qualityWeight > 0 ? Math.round(b.qualitySum / b.qualityWeight) : null; });
+  return buckets;
+}
+
+function formatHistoryVolume(volume, exerciseKey){
+  if(exerciseKey === 'all') return Math.round(volume / 60000) + ' min attivi';
+  const exMeta = EXERCISES[exerciseKey];
+  if(exMeta && exMeta.mode === 'reps') return volume + (volume === 1 ? ' ripetizione' : ' ripetizioni');
+  return volume >= 60 ? (volume / 60).toFixed(1).replace('.0', '') + ' min' : volume + ' sec';
+}
+
+// Ricostruisce le opzioni del filtro esercizio in base a cosa è davvero
+// presente in cronologia, per non offrire scelte che darebbero sempre un
+// grafico vuoto. Conserva la selezione corrente se è ancora valida.
+function populateHistoryExerciseFilter(){
+  const keysWithData = new Set(loadHistory().map(e => e.key));
+  historyExerciseFilter.innerHTML = '';
+  const allOpt = document.createElement('option');
+  allOpt.value = 'all';
+  allOpt.textContent = 'Tutti gli esercizi';
+  historyExerciseFilter.appendChild(allOpt);
+  Object.keys(EXERCISES).forEach(key => {
+    if(!keysWithData.has(key)) return;
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = EXERCISES[key].label;
+    historyExerciseFilter.appendChild(opt);
+  });
+  if(![...historyExerciseFilter.options].some(o => o.value === historyChartExercise)) historyChartExercise = 'all';
+  historyExerciseFilter.value = historyChartExercise;
+}
+
+function renderHistoryChart(){
+  [...historyPeriodTabs.children].forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.period === historyChartPeriod);
+  });
+
+  const buckets = computeHistoryChartData(historyChartPeriod, historyChartExercise);
+  const max = Math.max(1, ...buckets.map(b => b.volume));
 
   historyChart.innerHTML = '';
   const chart = document.createElement('div');
   chart.className = 'history-chart';
-  days.forEach(d => {
+  buckets.forEach(b => {
     const col = document.createElement('div');
     col.className = 'history-chart-col';
     const bar = document.createElement('div');
-    bar.className = 'history-chart-bar' + (d.total > 0 ? ' has-data' : '');
-    const heightPct = Math.round((d.total / max) * 100);
-    bar.style.height = (d.total > 0 ? Math.max(6, heightPct) : 2) + '%';
-    bar.title = d.total + ' ripetizioni valide';
+    bar.className = 'history-chart-bar' + (b.volume > 0 ? ' has-data' : '');
+    const heightPct = Math.round((b.volume / max) * 100);
+    bar.style.height = (b.volume > 0 ? Math.max(6, heightPct) : 2) + '%';
+    bar.title = formatHistoryVolume(b.volume, historyChartExercise) + (b.avgQuality != null ? ' · qualità ' + b.avgQuality : '') + ' — ' + b.rangeLabel;
     const label = document.createElement('div');
     label.className = 'history-chart-label';
-    label.textContent = d.label;
+    label.textContent = b.label;
     col.appendChild(bar);
     col.appendChild(label);
     chart.appendChild(col);
   });
   historyChart.appendChild(chart);
+
+  // Fila di pallini colorati con la qualità media del periodo, allineata
+  // sotto le barre — solo se c'è almeno un dato di qualità da mostrare.
+  const hasAnyQuality = buckets.some(b => b.avgQuality != null);
+  historyChartQualityRow.style.display = hasAnyQuality ? 'flex' : 'none';
+  historyChartQualityRow.innerHTML = '';
+  if(hasAnyQuality){
+    buckets.forEach(b => {
+      const col = document.createElement('div');
+      col.className = 'history-chart-quality-col';
+      const chip = document.createElement('div');
+      chip.className = 'history-chart-quality-chip';
+      if(b.avgQuality != null){
+        chip.style.background = b.avgQuality >= 80 ? 'var(--ok)' : (b.avgQuality >= 60 ? 'var(--warn)' : 'var(--bad)');
+        chip.title = 'Qualità media: ' + b.avgQuality + ' — ' + b.rangeLabel;
+      }
+      col.appendChild(chip);
+      historyChartQualityRow.appendChild(col);
+    });
+  }
+
+  const withData = buckets.filter(b => b.volume > 0);
+  if(withData.length === 0){
+    historyChartRecord.textContent = '';
+  } else {
+    const best = withData.reduce((a, b) => b.volume > a.volume ? b : a);
+    historyChartRecord.textContent = '🏆 Record del periodo: ' + formatHistoryVolume(best.volume, historyChartExercise) + ' — ' + best.rangeLabel;
+  }
 }
 
 function renderHistory(){
   renderGoalPanel();
+  populateHistoryExerciseFilter();
   renderHistoryChart();
   const rows = aggregateHistory();
   historyList.innerHTML = '';
@@ -6029,9 +6220,133 @@ async function shareText(text){
   }
 }
 
+// --- scheda riepilogo condivisibile come immagine ---
+// Oltre al solo testo, disegna una scheda grafica in stile "activity card"
+// (come quelle di Strava/Apple Fitness) su un canvas non visibile — nessuna
+// libreria esterna, nessun asset da scaricare. Il tema della scheda è
+// sempre lo stesso (scuro, colori del marchio) indipendentemente dal tema
+// chiaro/scuro attivo in quel momento nell'app: un'immagine condivisa deve
+// avere lo stesso aspetto su qualunque dispositivo la guardi, non dipendere
+// da un'impostazione locale di chi l'ha generata.
+async function renderShareCard({ heading, big, bigLabel, rows }){
+  try{ await document.fonts.ready; } catch(e){ /* prosegue comunque con il font di riserva */ }
+  const W = 1080;
+  const rowH = 78;
+  const rowsStartY = 560;
+  // Altezza calcolata sul numero di righe effettive, non fissa: con poche
+  // statistiche (es. una tenuta cronometrata, senza serie né cluster) una
+  // scheda a formato fisso lascerebbe un vuoto enorme in basso; con molte,
+  // rischierebbe di tagliarle. Un minimo comunque garantisce una scheda
+  // sempre dignitosa anche senza nessuna riga secondaria.
+  const H = Math.max(820, rowsStartY + rows.length * rowH + 170);
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const c = cv.getContext('2d');
+
+  const grad = c.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#151d2c');
+  grad.addColorStop(1, '#0e1420');
+  c.fillStyle = grad;
+  c.fillRect(0, 0, W, H);
+
+  c.textBaseline = 'alphabetic';
+  c.textAlign = 'left';
+  c.font = '700 44px Manrope, sans-serif';
+  c.fillStyle = '#eef2f8';
+  c.fillText('Forma', 64, 100);
+  c.fillStyle = '#2dd4bf';
+  c.fillText('Check', 64 + c.measureText('Forma').width, 100);
+
+  c.font = '600 34px Manrope, sans-serif';
+  c.fillStyle = '#8b95a8';
+  c.fillText(heading, 64, 170);
+
+  // Il numero principale (ripetizioni, tempo in tenuta...) può essere un
+  // testo lungo (es. "12:34" invece di "24"): restringe da solo la
+  // dimensione del font finché non entra nella larghezza della scheda,
+  // invece di uscirne o sovrapporsi ai bordi.
+  c.textAlign = 'center';
+  let bigSize = 170;
+  const bigText = String(big);
+  do {
+    c.font = '800 ' + bigSize + 'px Manrope, sans-serif';
+    bigSize -= 6;
+  } while(c.measureText(bigText).width > W - 140 && bigSize > 60);
+  c.fillStyle = '#eef2f8';
+  c.fillText(bigText, W/2, 400);
+  c.font = '600 38px Manrope, sans-serif';
+  c.fillStyle = '#2dd4bf';
+  c.fillText(bigLabel, W/2, 456);
+
+  let y = rowsStartY;
+  rows.forEach((r) => {
+    c.fillStyle = 'rgba(255,255,255,0.06)';
+    c.fillRect(64, y - 42, W - 128, rowH - 16);
+    c.textAlign = 'left';
+    c.font = '500 30px Manrope, sans-serif';
+    c.fillStyle = '#8b95a8';
+    c.fillText(r.label, 92, y);
+    c.textAlign = 'right';
+    c.font = '700 32px Manrope, sans-serif';
+    c.fillStyle = '#eef2f8';
+    c.fillText(String(r.value), W - 92, y);
+    y += rowH;
+  });
+
+  c.textAlign = 'center';
+  c.font = '400 24px Manrope, sans-serif';
+  c.fillStyle = '#8b95a8';
+  const dateStr = new Date().toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' });
+  c.fillText(dateStr + ' · allenamento a corpo libero seguito con la fotocamera', W/2, H - 48);
+
+  return cv;
+}
+
+// Come shareText, ma prova prima a condividere l'immagine generata da
+// renderShareCard: se il browser non supporta la condivisione di file, la
+// scarica (così resta comunque salvabile/inviabile a mano); se anche
+// generare l'immagine fallisce per qualche motivo, ripiega sulla
+// condivisione testuale già esistente, che ha meno probabilità di rottura.
+async function shareCard(cardOptions, text){
+  try{
+    const cv = await renderShareCard(cardOptions);
+    const blob = await new Promise(resolve => cv.toBlob(resolve, 'image/png'));
+    if(!blob) throw new Error('toBlob ha restituito null');
+    const file = new File([blob], 'formacheck.png', { type: 'image/png' });
+    if(navigator.canShare && navigator.canShare({ files: [file] })){
+      try{ await navigator.share({ files: [file], title: 'FormaCheck', text }); }
+      catch(e){ /* l'utente ha annullato: nessun avviso, è normale */ }
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'formacheck-riepilogo.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    pushFeedback('Immagine del riepilogo scaricata.', true);
+  } catch(e){
+    await shareText(text);
+  }
+}
+
 historyBtn.addEventListener('click', () => {
   renderHistory();
   historyOverlay.style.display = 'flex';
+});
+[...historyPeriodTabs.children].forEach(btn => {
+  btn.addEventListener('click', () => {
+    historyChartPeriod = btn.dataset.period;
+    try{ localStorage.setItem(HISTORY_CHART_PERIOD_KEY, historyChartPeriod); } catch(e){ /* storage non disponibile */ }
+    renderHistoryChart();
+  });
+});
+historyExerciseFilter.addEventListener('change', () => {
+  historyChartExercise = historyExerciseFilter.value;
+  try{ localStorage.setItem(HISTORY_CHART_EXERCISE_KEY, historyChartExercise); } catch(e){ /* storage non disponibile */ }
+  renderHistoryChart();
 });
 historyCloseBtn.addEventListener('click', () => {
   historyOverlay.style.display = 'none';
@@ -7242,7 +7557,9 @@ expandBtn.addEventListener('click', () => {
   const isExpanded = stageEl.classList.toggle('expanded');
   document.body.classList.toggle('stage-locked', isExpanded);
   expandBtn.innerHTML = isExpanded ? ICONS.collapse : ICONS.expand;
-  expandBtn.title = isExpanded ? 'Riduci' : "Ingrandisci l'inquadratura";
+  const label = isExpanded ? 'Riduci' : "Ingrandisci l'inquadratura";
+  expandBtn.title = label;
+  expandBtn.setAttribute('aria-label', label); // pulsante a sola icona: stesso motivo del tema
 });
 
 // Registra il service worker (app installabile, apertura più rapida): la
