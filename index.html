@@ -386,6 +386,44 @@
     from{ opacity:0; transform:translateY(-4px); }
     to{ opacity:1; transform:translateY(0); }
   }
+
+  /* Gruppo di impostazioni richiudibile (stessa estetica di .howto-panel):
+     usato per raccogliere sotto un'unica intestazione le funzioni
+     avanzate/opzionali, così il pannello principale mostra subito solo
+     l'essenziale invece di un lungo elenco piatto di pulsanti. */
+  .settings-group{ display:flex; flex-direction:column; }
+  .settings-group-toggle{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    width:100%;
+    background:var(--panel-3);
+    border:1px solid var(--line);
+    border-radius:var(--radius-md);
+    color:var(--ink);
+    font-family:'Manrope', sans-serif;
+    font-weight:600;
+    font-size:13px;
+    padding:12px 16px;
+    cursor:pointer;
+    transition:border-color .15s var(--ease), border-radius .2s var(--ease);
+  }
+  .settings-group-toggle:hover{ border-color:var(--accent-dim); }
+  .settings-group-toggle[aria-expanded="true"]{ border-radius:var(--radius-md) var(--radius-md) 0 0; }
+  .settings-group-chevron{ color:var(--ink-dim); transition:transform .2s var(--ease); font-size:12px; }
+  .settings-group-toggle[aria-expanded="true"] .settings-group-chevron{ transform:rotate(180deg); }
+  .settings-group-body{
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+    padding:16px;
+    background:var(--panel-3);
+    border:1px solid var(--line);
+    border-top:none;
+    border-radius:0 0 var(--radius-md) var(--radius-md);
+    animation:howtoIn .18s var(--ease);
+  }
+  .settings-group-body[hidden]{ display:none; animation:none; }
   .howto-list li{
     counter-increment:howto;
     padding-left:26px;
@@ -980,34 +1018,81 @@
       <button class="btn" id="resetBtn" disabled>Azzera</button>
     </div>
 
-    <div>
-      <div class="section-label">Feedback vocale</div>
-      <button class="btn" id="voiceBtn" style="width:100%;">🔈 Vocale disattivato — tocca per attivare</button>
-    </div>
-
-    <div>
-      <div class="section-label">Sottotitoli</div>
-      <button class="btn" id="captionsBtn" style="width:100%;">💬 Sottotitoli disattivati — tocca per attivare</button>
-    </div>
-
-    <div>
-      <div class="section-label">Comando vocale</div>
-      <button class="btn" id="voiceCommandBtn" style="width:100%;">🎙️ Comando vocale disattivato — tocca per attivare</button>
-      <div class="calib-status-note" id="voiceCommandHint" style="display:none; margin-top:8px;">Di' "avanti" per passare all'esercizio successivo nel circuito, "salta" per saltare il riposo, "pausa"/"riprendi" per fermarti e ripartire — senza toccare lo schermo.</div>
-    </div>
-
-    <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
-    <button class="btn" id="reactionTestBtn" style="width:100%;" title="Test del tempo di reazione: un protocollo reale usato nel ritorno allo sport dopo infortunio e nell'allenamento neuromuscolare. Serve la fotocamera già avviata.">⏱️ Test tempo di reazione</button>
-    <div class="calib-status-note" id="reactionTestHint">Misura quanto ci metti a reagire a uno stimolo a comparsa casuale: lo stesso tipo di test usato nel ritorno allo sport dopo un infortunio, per valutare la prontezza neuromuscolare. Serve la fotocamera già avviata.</div>
-
-    <div>
-      <div class="section-label">Backup dati</div>
-      <div style="display:flex; gap:8px;">
-        <button class="btn" id="exportBackupBtn" style="flex:1;">💾 Esporta backup</button>
-        <button class="btn" id="importBackupBtn" style="flex:1;">📂 Importa backup</button>
+    <div class="settings-group">
+      <button class="settings-group-toggle" id="advancedTrainingToggle" aria-expanded="false">
+        <span>⚙️ Allenamento avanzato</span>
+        <span class="settings-group-chevron" id="advancedTrainingChevron">▾</span>
+      </button>
+      <div class="settings-group-body" id="advancedTrainingBody" hidden>
+        <button class="btn" id="apreBtn" style="width:100%; display:none;">🎯 Autoregolazione APRE disattivata — tocca per attivare</button>
+        <div class="calib-status-note" id="apreHint" style="display:none;">Tra una serie e l'altra, alza o abbassa in automatico il traguardo di ripetizioni della serie successiva in base a come è andata quella appena conclusa (qualità della forma e velocità di esecuzione) — un'autoregolazione ispirata al protocollo APRE usato nello strength &amp; conditioning. Richiede almeno 2 serie.</div>
+        <button class="btn" id="clusterBtn" style="width:100%; display:none;">🔄 Cluster set disattivato — tocca per attivare</button>
+        <div id="clusterConfigRow" style="display:none; align-items:center; justify-content:center; gap:8px; font-size:11.5px; color:var(--ink-dim); padding:6px 0;">
+          <span>Ogni</span>
+          <input type="number" id="clusterSizeInput" min="1" value="2" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
+          <span>rip. pausa di</span>
+          <input type="number" id="clusterRestInput" min="5" value="15" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
+          <span>s</span>
+        </div>
+        <div class="calib-status-note" id="clusterHint" style="display:none;">Suddivide la serie in mini-blocchi con una breve pausa tra uno e l'altro, invece di ripetizioni continue: aiuta a mantenere la potenza alta invece di lasciarla calare per la fatica, come nel "cluster training" usato nell'allenamento della forza esplosiva.</div>
+        <button class="btn" id="periodizationBtn" style="width:100%; display:none;" title="Alterna automaticamente accumulo, intensificazione e scarico su un ciclo di 4 settimane, scalando il traguardo base di una percentuale fissa per settimana. Si compone con l'autoregolazione APRE, se attiva anche quella.">🗓️ Periodizzazione disattivata — tocca per attivare</button>
+        <div class="calib-status-note" id="periodizationHint" style="display:none;">Alterna in automatico, settimana dopo settimana, fasi di accumulo, intensificazione e scarico su un ciclo di 4 settimane — invece di allenarti sempre con lo stesso traguardo, scala da solo quante ripetizioni chiederti a seconda della settimana del ciclo. Si combina con l'autoregolazione APRE, se attiva anche quella.</div>
+        <div class="calib-status-note" id="periodizationBadge" style="display:none;"></div>
+        <div id="singleRestPresetWrap" style="display:none;">
+          <div class="section-label">Riposo tra le serie</div>
+          <div class="cam-select" id="singleRestPresetSelect">
+            <button class="cam-btn restpreset-btn" data-rest="30">30s</button>
+            <button class="cam-btn restpreset-btn active" data-rest="60">60s</button>
+            <button class="cam-btn restpreset-btn" data-rest="90">90s</button>
+          </div>
+        </div>
       </div>
-      <input type="file" id="importBackupInput" accept="application/json" style="display:none;">
-      <div class="calib-status-note" id="backupStatusNote" style="display:none;"></div>
+    </div>
+
+    <div class="settings-group">
+      <button class="settings-group-toggle" id="voiceAccessibilityToggle" aria-expanded="false">
+        <span>🔈 Vocale e accessibilità</span>
+        <span class="settings-group-chevron" id="voiceAccessibilityChevron">▾</span>
+      </button>
+      <div class="settings-group-body" id="voiceAccessibilityBody" hidden>
+        <div>
+          <div class="section-label">Feedback vocale</div>
+          <button class="btn" id="voiceBtn" style="width:100%;">🔈 Vocale disattivato — tocca per attivare</button>
+        </div>
+
+        <div>
+          <div class="section-label">Sottotitoli</div>
+          <button class="btn" id="captionsBtn" style="width:100%;">💬 Sottotitoli disattivati — tocca per attivare</button>
+        </div>
+
+        <div>
+          <div class="section-label">Comando vocale</div>
+          <button class="btn" id="voiceCommandBtn" style="width:100%;">🎙️ Comando vocale disattivato — tocca per attivare</button>
+          <div class="calib-status-note" id="voiceCommandHint" style="display:none; margin-top:8px;">Di' "avanti" per passare all'esercizio successivo nel circuito, "salta" per saltare il riposo, "pausa"/"riprendi" per fermarti e ripartire — senza toccare lo schermo.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <button class="settings-group-toggle" id="historyDataToggle" aria-expanded="false">
+        <span>📊 Cronologia e dati</span>
+        <span class="settings-group-chevron" id="historyDataChevron">▾</span>
+      </button>
+      <div class="settings-group-body" id="historyDataBody" hidden>
+        <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
+        <button class="btn" id="reactionTestBtn" style="width:100%;" title="Test del tempo di reazione: un protocollo reale usato nel ritorno allo sport dopo infortunio e nell'allenamento neuromuscolare. Serve la fotocamera già avviata.">⏱️ Test tempo di reazione</button>
+        <div class="calib-status-note" id="reactionTestHint">Misura quanto ci metti a reagire a uno stimolo a comparsa casuale: lo stesso tipo di test usato nel ritorno allo sport dopo un infortunio, per valutare la prontezza neuromuscolare. Serve la fotocamera già avviata.</div>
+
+        <div>
+          <div class="section-label">Backup dati</div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn" id="exportBackupBtn" style="flex:1;">💾 Esporta backup</button>
+            <button class="btn" id="importBackupBtn" style="flex:1;">📂 Importa backup</button>
+          </div>
+          <input type="file" id="importBackupInput" accept="application/json" style="display:none;">
+          <div class="calib-status-note" id="backupStatusNote" style="display:none;"></div>
+        </div>
+      </div>
     </div>
 
     <button class="btn" id="recalibBtn" style="display:none;">Ricalibra posizione</button>
@@ -1050,29 +1135,6 @@
 
     <div id="pairQualityRow" style="display:none; text-align:center; padding-bottom:6px; font-size:11.5px; color:var(--ink-dim);" title="Punteggio euristico: combina pulizia della forma e scorrevolezza del movimento fotogramma per fotogramma. Non è un modello di intelligenza artificiale addestrato su dati reali.">
       Qualità movimento (euristica) — A: <span id="pairQualityA" style="font-weight:700; color:var(--ink);">—</span> · B: <span id="pairQualityB" style="font-weight:700; color:var(--ink);">—</span>
-    </div>
-
-    <button class="btn" id="apreBtn" style="width:100%; display:none;">🎯 Autoregolazione APRE disattivata — tocca per attivare</button>
-    <div class="calib-status-note" id="apreHint" style="display:none; margin-top:8px; margin-bottom:8px;">Tra una serie e l'altra, alza o abbassa in automatico il traguardo di ripetizioni della serie successiva in base a come è andata quella appena conclusa (qualità della forma e velocità di esecuzione) — un'autoregolazione ispirata al protocollo APRE usato nello strength &amp; conditioning. Richiede almeno 2 serie.</div>
-    <button class="btn" id="clusterBtn" style="width:100%; display:none;">🔄 Cluster set disattivato — tocca per attivare</button>
-    <div id="clusterConfigRow" style="display:none; align-items:center; justify-content:center; gap:8px; font-size:11.5px; color:var(--ink-dim); padding:6px 0;">
-      <span>Ogni</span>
-      <input type="number" id="clusterSizeInput" min="1" value="2" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
-      <span>rip. pausa di</span>
-      <input type="number" id="clusterRestInput" min="5" value="15" style="width:44px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:4px; text-align:center; font-family:'Manrope', sans-serif;">
-      <span>s</span>
-    </div>
-    <div class="calib-status-note" id="clusterHint" style="display:none; margin-top:0; margin-bottom:8px;">Suddivide la serie in mini-blocchi con una breve pausa tra uno e l'altro, invece di ripetizioni continue: aiuta a mantenere la potenza alta invece di lasciarla calare per la fatica, come nel "cluster training" usato nell'allenamento della forza esplosiva.</div>
-    <button class="btn" id="periodizationBtn" style="width:100%; display:none;" title="Alterna automaticamente accumulo, intensificazione e scarico su un ciclo di 4 settimane, scalando il traguardo base di una percentuale fissa per settimana. Si compone con l'autoregolazione APRE, se attiva anche quella.">🗓️ Periodizzazione disattivata — tocca per attivare</button>
-    <div class="calib-status-note" id="periodizationHint" style="display:none;">Alterna in automatico, settimana dopo settimana, fasi di accumulo, intensificazione e scarico su un ciclo di 4 settimane — invece di allenarti sempre con lo stesso traguardo, scala da solo quante ripetizioni chiederti a seconda della settimana del ciclo. Si combina con l'autoregolazione APRE, se attiva anche quella.</div>
-    <div class="calib-status-note" id="periodizationBadge" style="display:none; margin-top:8px; margin-bottom:8px;"></div>
-    <div id="singleRestPresetWrap" style="display:none;">
-      <div class="section-label">Riposo tra le serie</div>
-      <div class="cam-select" id="singleRestPresetSelect">
-        <button class="cam-btn restpreset-btn" data-rest="30">30s</button>
-        <button class="cam-btn restpreset-btn active" data-rest="60">60s</button>
-        <button class="cam-btn restpreset-btn" data-rest="90">90s</button>
-      </div>
     </div>
 
     <div>
@@ -1741,6 +1803,7 @@ function apreAdjustGoal(){
 function handleGoalReached(achievedLabel){
   if(currentSet >= setsGoal){
     pushFeedback('🎯 Traguardo raggiunto: ' + achievedLabel + '!', true);
+    hapticCelebrate();
     return;
   }
   pushFeedback('🎯 Serie ' + currentSet + ' di ' + setsGoal + ' completata: ' + achievedLabel + '.', true);
@@ -4640,6 +4703,17 @@ function playBeep(){
   } catch(e){ /* audio non disponibile in questo contesto */ }
 }
 
+// --- feedback aptico ---
+// Una breve vibrazione per i momenti "traguardo raggiunto": non sostituisce
+// il vocale o i sottotitoli, ma un piccolo tocco fisico che conferma un
+// risultato senza dover guardare lo schermo — utile a fine serie o fine
+// circuito, quando il telefono è appoggiato lontano. Disponibile solo su
+// Android/Chrome: su iOS Safari e desktop l'API semplicemente non esiste,
+// nessun errore, nessun effetto.
+function hapticCelebrate(){
+  try{ if(navigator.vibrate) navigator.vibrate([40, 60, 40]); } catch(e){ /* non disponibile su questo dispositivo/browser */ }
+}
+
 function formatRestTime(sec){
   const m = Math.floor(sec / 60);
   const s = sec % 60;
@@ -4989,6 +5063,7 @@ function finishCircuit(){
   circuitSummaryOverlay.style.display = 'flex';
   circuitSummaryShareBtn.onclick = () => shareText(summaryText);
   if(voiceEnabled) speak('Circuito completato, ottimo lavoro.');
+  hapticCelebrate();
 }
 
 function startCircuit(){
@@ -5492,6 +5567,36 @@ updateGoalUI();
 buildCircuitList();
 expandBtn.innerHTML = ICONS.expand;
 historyBtn.innerHTML = '<span class="btn-icon">' + ICONS.history + '</span>Cronologia allenamenti';
+
+// Gruppi di impostazioni richiudibili: raggruppano le funzioni opzionali/
+// avanzate sotto un'unica intestazione, invece del lungo elenco piatto di
+// pulsanti che il pannello era diventato con l'aggiunta di ogni nuova
+// funzione. Lo stato aperto/chiuso si ricorda tra una sessione e l'altra;
+// se l'utente ha già attivato qualcosa al loro interno la prima volta che
+// arriva qui (es. aveva già acceso i sottotitoli), il gruppo parte aperto
+// invece di nascondere una funzione che sta già usando.
+function wireSettingsGroup(toggleId, bodyId, storageKey, defaultExpanded){
+  const toggle = document.getElementById(toggleId);
+  const body = document.getElementById(bodyId);
+  let expanded = defaultExpanded;
+  try{
+    const saved = localStorage.getItem(storageKey);
+    if(saved != null) expanded = saved === '1';
+  } catch(e){ /* storage non disponibile: resta il valore di default */ }
+  const apply = () => {
+    body.hidden = !expanded;
+    toggle.setAttribute('aria-expanded', String(expanded));
+  };
+  apply();
+  toggle.addEventListener('click', () => {
+    expanded = !expanded;
+    apply();
+    try{ localStorage.setItem(storageKey, expanded ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
+  });
+}
+wireSettingsGroup('advancedTrainingToggle', 'advancedTrainingBody', 'formacheck_group_advanced_v1', apreEnabled || clusterEnabled || periodizationEnabled);
+wireSettingsGroup('voiceAccessibilityToggle', 'voiceAccessibilityBody', 'formacheck_group_voice_v1', captionsEnabled || voiceCommandEnabled);
+wireSettingsGroup('historyDataToggle', 'historyDataBody', 'formacheck_group_history_v1', false);
 
 function resetMetrics(){
   logSessionIfActive();
