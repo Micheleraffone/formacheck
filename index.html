@@ -807,6 +807,13 @@
   .symmetry-row-detail{ color:var(--ink-dim); font-size:11px; }
   .symmetry-ratio{ font-family:'Manrope', sans-serif; font-weight:700; font-size:16px; flex-shrink:0; }
 
+  .musclezone-panel{ display:flex; flex-direction:column; gap:7px; }
+  .musclezone-row{ display:flex; align-items:center; gap:8px; }
+  .musclezone-row-label{ width:60px; flex-shrink:0; font-size:11.5px; color:var(--ink-dim); text-align:right; }
+  .musclezone-bar-track{ flex:1; height:13px; background:var(--panel-3); border:1px solid var(--line); border-radius:7px; overflow:hidden; }
+  .musclezone-bar-fill{ height:100%; background:var(--accent); border-radius:7px 0 0 7px; }
+  .musclezone-row-value{ width:50px; flex-shrink:0; font-size:11px; color:var(--ink-dim); }
+
   /* Isola il report settimanale quando si stampa (o si salva come PDF dal
      dialogo di stampa del browser): nasconde tutto il resto della pagina,
      forzando colori chiari su sfondo bianco indipendentemente dal tema
@@ -883,6 +890,14 @@
       <div class="rest-countdown" id="warmupCountdown">20</div>
       <button class="calib-skip" id="warmupSkipBtn">Salta riscaldamento</button>
     </div>
+    <div class="calib-overlay" id="cooldownOverlay" style="display:none;">
+      <div class="calib-title">🧘 Defaticamento guidato</div>
+      <div class="view-badge-icon" style="font-size:32px;">🧊</div>
+      <div class="calib-hint" id="cooldownMoveLabel" style="font-size:16px; color:var(--ink);"></div>
+      <div class="calib-hint" id="cooldownMoveHint"></div>
+      <div class="rest-countdown" id="cooldownCountdown">25</div>
+      <button class="calib-skip" id="cooldownSkipBtn">Salta defaticamento</button>
+    </div>
     <div class="calib-overlay" id="restOverlay" style="display:none;">
       <div class="calib-title">Riposo</div>
       <div class="calib-hint" id="restNextLabel"></div>
@@ -917,13 +932,16 @@
         <div id="rpeButtons" style="display:flex; gap:4px; flex-wrap:wrap; justify-content:center;"></div>
         <div class="calib-status-note" id="rpeLoadNote" style="display:none; margin-top:2px;"></div>
       </div>
-      <div style="display:flex; gap:10px;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
         <button class="calib-skip" id="sessionSummaryShareBtn">Condividi</button>
+        <button class="calib-skip" id="sessionSummaryCooldownBtn">🧘 Defaticamento</button>
         <button class="calib-skip" id="sessionSummaryCloseBtn">Chiudi</button>
       </div>
     </div>
     <div class="calib-overlay" id="historyOverlay" style="display:none;">
       <div class="calib-title">Cronologia allenamenti</div>
+
+      <!-- Sempre visibile: lo stato essenziale a colpo d'occhio, senza dover aprire nulla. -->
       <div id="goalPanel" style="width:100%; max-width:340px; display:flex; flex-direction:column; gap:8px; align-items:center;">
         <div id="deloadBadge" class="calib-status-note" style="display:none; width:100%; box-sizing:border-box;" title="Combina tre segnali già misurati altrove nell'app — carico di allenamento (ACWR), benessere percepito (Hooper Index) e andamento della velocità di esecuzione (VBT) nelle ultime sessioni — invece di un singolo numero, perché ciascun segnale preso da solo può dare falsi allarmi. Regole trasparenti, non un modello addestrato: più segnali in stato di allerta insieme, più la raccomandazione di scarico è forte."></div>
         <div id="streakBadge" style="font-family:'Manrope', sans-serif; font-weight:700; font-size:15px;">🔥 0 giorni di fila</div>
@@ -933,20 +951,34 @@
         </div>
         <div class="calib-progress" style="width:220px;"><div class="calib-progress-bar" id="goalProgressBar"></div></div>
         <div id="goalProgressLabel" style="font-size:11.5px; color:var(--ink-dim);"></div>
+      </div>
 
-        <button class="btn" id="reminderToggleBtn" style="width:100%; max-width:280px;">🔔 Promemoria disattivati — tocca per attivare</button>
-        <div class="calib-status-note" id="reminderHint" style="display:none; width:100%; max-width:280px; box-sizing:border-box; text-align:left;"></div>
+      <div class="settings-group" style="width:100%; max-width:340px;">
+        <button class="settings-group-toggle" id="goalExtrasToggle" aria-expanded="false">
+          <span>🔔 Promemoria, peso e carico</span>
+          <span class="settings-group-chevron" id="goalExtrasChevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="settings-group-body" id="goalExtrasBody" hidden style="align-items:center;">
+          <button class="btn" id="reminderToggleBtn" style="width:100%;">🔔 Promemoria disattivati — tocca per attivare</button>
+          <div class="calib-status-note" id="reminderHint" style="display:none; text-align:left;"></div>
 
-        <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-dim);">
-          <span>Peso corporeo, per stimare le calorie</span>
-          <input type="number" id="bodyWeightInput" min="30" max="250" placeholder="70" aria-label="Peso corporeo in chilogrammi, per stimare le calorie" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
-          <span>kg</span>
+          <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-dim); justify-content:center;">
+            <span>Peso corporeo, per stimare le calorie</span>
+            <input type="number" id="bodyWeightInput" min="30" max="250" placeholder="70" aria-label="Peso corporeo in chilogrammi, per stimare le calorie" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+            <span>kg</span>
+          </div>
+          <div id="caloriesTotalBadge" class="calib-status-note" style="display:none;"></div>
+          <div id="acwrBadge" class="calib-status-note" style="display:none;" title="Rapporto tra il carico di allenamento dell'ultima settimana e la media delle ultime 4 settimane (Acute:Chronic Workload Ratio). Zona 0.8-1.3: aumento di carico prudente. Sopra 1.5: la letteratura sportiva associa un salto così rapido a un rischio di infortunio maggiore. Richiede di aver valutato lo sforzo (RPE) di almeno qualche sessione."></div>
         </div>
-        <div id="caloriesTotalBadge" class="calib-status-note" style="display:none;"></div>
-        <div id="acwrBadge" class="calib-status-note" style="display:none;" title="Rapporto tra il carico di allenamento dell'ultima settimana e la media delle ultime 4 settimane (Acute:Chronic Workload Ratio). Zona 0.8-1.3: aumento di carico prudente. Sopra 1.5: la letteratura sportiva associa un salto così rapido a un rischio di infortunio maggiore. Richiede di aver valutato lo sforzo (RPE) di almeno qualche sessione."></div>
+      </div>
 
-        <div id="wellnessSection" style="width:100%; max-width:300px; display:flex; flex-direction:column; gap:8px; align-items:center; padding-top:10px; margin-top:2px; border-top:1px solid var(--line);">
-          <div class="section-label">Benessere di oggi (Hooper Index) — 1 ottimo, 7 pessimo</div>
+      <div class="settings-group" style="width:100%; max-width:300px;">
+        <button class="settings-group-toggle" id="wellnessToggle" aria-expanded="false">
+          <span>❤️ Benessere di oggi (Hooper Index)</span>
+          <span class="settings-group-chevron" id="wellnessChevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="settings-group-body" id="wellnessSection" hidden style="align-items:center;">
+          <div class="calib-hint" style="margin:0;">1 ottimo, 7 pessimo.</div>
           <div style="display:grid; grid-template-columns:1fr auto; gap:6px 10px; width:100%; font-size:12px; color:var(--ink-dim); align-items:center;">
             <span>Affaticamento</span>
             <input type="number" id="wellnessFatigue" min="1" max="7" value="4" aria-label="Affaticamento, da 1 (ottimo) a 7 (pessimo)" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
@@ -961,6 +993,7 @@
           <div class="calib-status-note" id="wellnessBadge" style="display:none;"></div>
         </div>
       </div>
+
       <div class="history-period-tabs" id="historyPeriodTabs" role="group" aria-label="Periodo del grafico">
         <button class="history-period-tab" id="historyPeriodW2" data-period="w2" type="button">14 giorni</button>
         <button class="history-period-tab" id="historyPeriodM3" data-period="m3" type="button">3 mesi</button>
@@ -974,12 +1007,32 @@
       <div class="history-chart-note" id="historyChartInsight" style="width:100%; max-width:340px;"></div>
       <div class="history-chart-note" id="historyChartRecord" style="width:100%; max-width:340px;"></div>
 
-      <div style="width:100%; max-width:340px; display:flex; flex-direction:column; gap:6px; padding-top:10px; margin-top:2px; border-top:1px solid var(--line);">
-        <div class="section-label" title="Confronta la profondità/ampiezza raggiunta dal lato sinistro e destro del corpo — lo stesso tipo di analisi (Limb Symmetry Index) usato nella riabilitazione sportiva dopo un infortunio. Richiede un esercizio dove entrambi i lati sono confrontabili (vista frontale, o gambe alternate) e almeno 3 ripetizioni valide per lato in una sessione.">🦵 Simmetria sinistra/destra</div>
-        <div id="symmetryPanel" class="symmetry-panel"></div>
+      <div class="settings-group" style="width:100%; max-width:340px;">
+        <button class="settings-group-toggle" id="advancedAnalysisToggle" aria-expanded="false">
+          <span>🔬 Analisi avanzata</span>
+          <span class="settings-group-chevron" id="advancedAnalysisChevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="settings-group-body" id="advancedAnalysisBody" hidden>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <div class="section-label" title="Confronta la profondità/ampiezza raggiunta dal lato sinistro e destro del corpo — lo stesso tipo di analisi (Limb Symmetry Index) usato nella riabilitazione sportiva dopo un infortunio. Richiede un esercizio dove entrambi i lati sono confrontabili (vista frontale, o gambe alternate) e almeno 3 ripetizioni valide per lato in una sessione.">🦵 Simmetria sinistra/destra</div>
+            <div id="symmetryPanel" class="symmetry-panel"></div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <div class="section-label" title="Quanto tempo attivo ha coinvolto ciascuna zona nel periodo selezionato sopra (stesse schede 14 giorni / 3 mesi / 12 mesi del grafico). Un esercizio che lavora più zone insieme (es. lo squat: gambe, glutei, core) conta per intero su ognuna, non diviso tra loro: è un indicatore di quanto una zona è stata sollecitata, non una stima anatomica precisa.">🧭 Statistiche per zona muscolare</div>
+            <div id="muscleZonePanel" class="musclezone-panel"></div>
+          </div>
+        </div>
       </div>
 
-      <div id="historyList" style="width:100%; max-width:340px; max-height:36vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
+      <!-- flex-shrink:0 è la parte che conta qui, non solo stilistica: dentro un
+           flex column che scrolla (historyOverlay), un figlio che ha a sua volta
+           overflow-y:auto senza flex-shrink:0 viene schiacciato dal browser a
+           altezza 0 (min-height:auto diventa 0 per gli elementi con overflow, per
+           spec flexbox) invece di rispettare max-height — bug preesistente, non
+           introdotto qui, che rendeva la lista sessioni sempre invisibile appena
+           il contenuto sopra superava l'altezza disponibile. Verificato anche su
+           origin/main prima di questa modifica. -->
+      <div id="historyList" style="width:100%; max-width:340px; max-height:36vh; overflow-y:auto; flex-shrink:0; display:flex; flex-direction:column; gap:8px;"></div>
       <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
         <button class="calib-skip" id="weeklyReportBtn">📄 Report settimanale</button>
         <button class="calib-skip" id="historyExportBtn">Esporta</button>
@@ -1173,7 +1226,20 @@
       <button class="btn primary" id="startBtn">Avvia fotocamera</button>
       <button class="btn" id="resetBtn" disabled>Azzera</button>
     </div>
-    <button class="btn" id="warmupBtn" style="width:100%;" title="Una breve sequenza di mobilità guidata a voce, mirata sui gruppi muscolari dell'esercizio scelto, prima di iniziare a freddo.">🔥 Riscaldamento guidato</button>
+
+    <div class="settings-group">
+      <button class="settings-group-toggle" id="prepToggle" aria-expanded="false">
+        <span>🤸 Prima di allenarti</span>
+        <span class="settings-group-chevron" id="prepChevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="settings-group-body" id="prepBody" hidden>
+        <button class="btn" id="warmupBtn" style="width:100%;" title="Una breve sequenza di mobilità guidata a voce, mirata sui gruppi muscolari dell'esercizio scelto, prima di iniziare a freddo.">🔥 Riscaldamento guidato</button>
+        <button class="btn" id="reactionTestBtn" style="width:100%;" title="Test del tempo di reazione: un protocollo reale usato nel ritorno allo sport dopo infortunio e nell'allenamento neuromuscolare. Serve la fotocamera già avviata.">⏱️ Test tempo di reazione</button>
+        <div class="calib-status-note" id="reactionTestHint">Misura quanto ci metti a reagire a uno stimolo a comparsa casuale: lo stesso tipo di test usato nel ritorno allo sport dopo un infortunio, per valutare la prontezza neuromuscolare. Serve la fotocamera già avviata.</div>
+        <button class="btn" id="postureCheckBtn" style="width:100%;" title="Screening informale di livello spalle, livello bacino e allineamento laterale busto-bacino, in piedi frontale alla fotocamera per pochi secondi. Serve la fotocamera già avviata.">🧍 Check-up posturale</button>
+        <div class="calib-status-note" id="postureCheckHint">Uno screening rapido e informale — non una valutazione clinica — di livello spalle, livello bacino e allineamento laterale, in piedi frontale alla fotocamera per pochi secondi. Serve la fotocamera già avviata.</div>
+      </div>
+    </div>
 
     <div class="settings-group">
       <button class="settings-group-toggle" id="advancedTrainingToggle" aria-expanded="false">
@@ -1205,6 +1271,8 @@
         </div>
         <button class="btn" id="ghostBtn" style="width:100%;" title="Sovrappone allo scheletro in tempo reale, semi-trasparente e tratteggiato, la sagoma della tua migliore ripetizione storica per questo esercizio (quella con il punteggio qualità più alto) — un confronto visivo diretto con il tuo meglio, non con un modello generico. Si aggiorna da sola appena ne fai una ancora migliore.">👻 Scheletro fantasma disattivato — tocca per attivare</button>
         <div class="calib-status-note" id="ghostHint" style="display:none;">Confronta in tempo reale la tua ripetizione con la tua migliore ripetizione storica per questo esercizio (in viola, tratteggiata). Disponibile solo per gli esercizi a ripetizioni, dopo che ne hai completata almeno una valida — finché non c'è ancora un dato, semplicemente non appare nulla.</div>
+        <button class="btn" id="amrapBtn" style="width:100%; display:none;" title="Invece del traguardo a ripetizioni, hai 60 secondi fissi: conta quante ripetizioni valide fai. A tempo scaduto lo sentirai annunciare — tocca 'Azzera' quando vuoi per vedere il risultato e il confronto con il tuo record su questo esercizio.">⏱️ Sfida a tempo (AMRAP) disattivata — tocca per attivare</button>
+        <div class="calib-status-note" id="amrapHint" style="display:none;"></div>
       </div>
     </div>
 
@@ -1239,10 +1307,6 @@
       </button>
       <div class="settings-group-body" id="historyDataBody" hidden>
         <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
-        <button class="btn" id="reactionTestBtn" style="width:100%;" title="Test del tempo di reazione: un protocollo reale usato nel ritorno allo sport dopo infortunio e nell'allenamento neuromuscolare. Serve la fotocamera già avviata.">⏱️ Test tempo di reazione</button>
-        <div class="calib-status-note" id="reactionTestHint">Misura quanto ci metti a reagire a uno stimolo a comparsa casuale: lo stesso tipo di test usato nel ritorno allo sport dopo un infortunio, per valutare la prontezza neuromuscolare. Serve la fotocamera già avviata.</div>
-        <button class="btn" id="postureCheckBtn" style="width:100%;" title="Screening informale di livello spalle, livello bacino e allineamento laterale busto-bacino, in piedi frontale alla fotocamera per pochi secondi. Serve la fotocamera già avviata.">🧍 Check-up posturale</button>
-        <div class="calib-status-note" id="postureCheckHint">Uno screening rapido e informale — non una valutazione clinica — di livello spalle, livello bacino e allineamento laterale, in piedi frontale alla fotocamera per pochi secondi. Serve la fotocamera già avviata.</div>
 
         <div>
           <div class="section-label">Backup dati</div>
@@ -1281,6 +1345,10 @@
 
     <div id="tempoBadgeRow" style="display:none; text-align:center; padding-bottom:6px; font-size:11.5px; color:var(--ink-dim);" title="Tempo reale di discesa e risalita dell'ultima ripetizione, stimato dal punto di inversione della metrica angolare principale. Un tempo di discesa molto breve indica un movimento di slancio, non controllato.">
       Tempo: <span id="tempoBadgeValue" style="font-weight:700; color:var(--ink);">—</span>
+    </div>
+
+    <div id="amrapCountdownRow" style="display:none; text-align:center; padding-bottom:6px; font-family:'Manrope', sans-serif; font-weight:700; font-size:15px; color:var(--accent);">
+      ⏱️ Tempo rimasto: <span id="amrapCountdownValue">1:00</span>
     </div>
 
     <div id="pairCountersRow" style="display:none; gap:10px; padding:6px 0 2px;">
@@ -1331,6 +1399,12 @@ const warmupMoveLabel = document.getElementById('warmupMoveLabel');
 const warmupMoveHint = document.getElementById('warmupMoveHint');
 const warmupCountdown = document.getElementById('warmupCountdown');
 const warmupSkipBtn = document.getElementById('warmupSkipBtn');
+const cooldownOverlay = document.getElementById('cooldownOverlay');
+const cooldownMoveLabel = document.getElementById('cooldownMoveLabel');
+const cooldownMoveHint = document.getElementById('cooldownMoveHint');
+const cooldownCountdown = document.getElementById('cooldownCountdown');
+const cooldownSkipBtn = document.getElementById('cooldownSkipBtn');
+const sessionSummaryCooldownBtn = document.getElementById('sessionSummaryCooldownBtn');
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const loadingOverlay = document.getElementById('loadingOverlay');
@@ -1360,6 +1434,10 @@ const vbtBadgeRow = document.getElementById('vbtBadgeRow');
 const vbtBadgeValue = document.getElementById('vbtBadgeValue');
 const tempoBadgeRow = document.getElementById('tempoBadgeRow');
 const tempoBadgeValue = document.getElementById('tempoBadgeValue');
+const amrapBtn = document.getElementById('amrapBtn');
+const amrapHint = document.getElementById('amrapHint');
+const amrapCountdownRow = document.getElementById('amrapCountdownRow');
+const amrapCountdownValue = document.getElementById('amrapCountdownValue');
 const calibOverlay = document.getElementById('calibOverlay');
 const calibChecklist = document.getElementById('calibChecklist');
 const calibBar = document.getElementById('calibBar');
@@ -1467,6 +1545,7 @@ const historyChartRecord = document.getElementById('historyChartRecord');
 const historyPeriodTabs = document.getElementById('historyPeriodTabs');
 const historyExerciseFilter = document.getElementById('historyExerciseFilter');
 const symmetryPanel = document.getElementById('symmetryPanel');
+const muscleZonePanel = document.getElementById('muscleZonePanel');
 const historyList = document.getElementById('historyList');
 const weeklyReportBtn = document.getElementById('weeklyReportBtn');
 const weeklyReportOverlay = document.getElementById('weeklyReportOverlay');
@@ -4352,6 +4431,347 @@ const EXERCISES = {
         metrics: [{ value: Math.round(elbowAngle) + '°', ok: elbowOk }]
       };
     }
+  },
+
+  calfraise: {
+    label: 'Slanci al polpaccio',
+    mode: 'reps',
+    met: 3,
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, a figura intera: serve vedere il profilo del piede e della caviglia.",
+    howto: [
+      'In piedi, gambe dritte, appoggiati a una superficie se ti serve equilibrio.',
+      'Solleva i talloni spingendo sulle punte dei piedi, il più in alto possibile.',
+      'Resta un istante in massima estensione della caviglia.',
+      'Scendi lentamente fino a riappoggiare i talloni a terra.'
+    ],
+    metricLabels: ['Caviglia', 'Ginocchio'],
+    muscles: { visual:['calves'], text:['Gastrocnemio', 'Soleo'] },
+    // A differenza di squat/affondo, qui il ginocchio NON deve piegarsi: se lo
+    // fa, il movimento diventa un mini-squat invece di un vero slancio sui
+    // polpacci. kneeMin è quindi una soglia di sicurezza contro questo, non un
+    // bersaglio da raggiungere come per gli altri esercizi.
+    thresholds: { kneeMin: 165, ankleDownExit: 100, ankleUpEnter: 120, ankleTargetMin: 140 },
+    calib: {
+      steps: [
+        { prompt: "Stai in piedi, gambe dritte, talloni a terra, di lato alla fotocamera.",
+          sample(lm){ const s = pickSide3D(lm); return { ankle: angleBetween(s.knee, s.ankle, s.toe), knee: angleBetween(s.hip, s.knee, s.ankle) }; } },
+        { prompt: "Sali sulle punte dei piedi il più in alto possibile e resta fermo.",
+          sample(lm){ const s = pickSide3D(lm); return { ankle: angleBetween(s.knee, s.ankle, s.toe), knee: angleBetween(s.hip, s.knee, s.ankle) }; } }
+      ],
+      apply(vals, t){
+        const ankleLow = Math.min(vals[0].ankle, vals[1].ankle);
+        const ankleHigh = Math.max(vals[0].ankle, vals[1].ankle);
+        if(ankleHigh - ankleLow < 15) return false; // movimento troppo simile tra i due passi: non calibro
+        const kneeRef = Math.min(vals[0].knee, vals[1].knee); // il ginocchio deve restare vicino a questo per tutto il movimento
+        t.kneeMin = Math.max(140, Math.round(kneeRef - 15));
+        t.ankleDownExit = Math.round(ankleLow + 8);
+        t.ankleUpEnter = Math.max(t.ankleDownExit + 8, Math.round((ankleLow + ankleHigh) / 2));
+        t.ankleTargetMin = Math.max(t.ankleUpEnter + 5, Math.round(ankleHigh - 8));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide3D(lm);
+      const ankleAngle = angleBetween(s.knee, s.ankle, s.toe);
+      const kneeAngle = angleBetween(s.hip, s.knee, s.ankle);
+      if(ankleAngle == null || kneeAngle == null) return null;
+
+      const kneeOk = kneeAngle >= t.kneeMin;
+      const issues = [];
+      if(!kneeOk) issues.push('Non piegare le ginocchia: il movimento deve venire solo dalla caviglia.');
+
+      if(exState.phase === undefined){ exState.phase = 'down'; exState.repHadIssue = false; exState.issueSince = null; exState.reachedTarget = false; }
+      trackFormIssue(!kneeOk, 'Non piegare le ginocchia: il movimento deve venire solo dalla caviglia.');
+      if(exState.phase === 'down' && ankleAngle > t.ankleUpEnter){
+        exState.phase = 'up';
+        exState.reachedTarget = false;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'up'){
+        if(!exState.reachedTarget && ankleAngle >= t.ankleTargetMin) exState.reachedTarget = true;
+        if(ankleAngle < t.ankleDownExit){
+          exState.phase = 'down';
+          const tooFast = repTooFast(exState.phaseStart);
+          let invalidParts;
+          if(tooFast) invalidParts = 'Movimento troppo rapido o instabile: ripetizione non conteggiata.';
+          else if(!exState.reachedTarget) invalidParts = rejectRepSequence('Sali di più sulle punte per estendere bene la caviglia.');
+          else if(exState.repHadIssue) invalidParts = rejectRepSequence(exState.lastIssueMsg);
+          completeRep(tooFast || !exState.reachedTarget || exState.repHadIssue, invalidParts, 'Buona estensione della caviglia.');
+          exState.repHadIssue = false;
+          exState.issueSince = null;
+        }
+      }
+      if(exState.phase === 'up' && !exState.reachedTarget) issues.push('Sali di più sulle punte per estendere bene la caviglia.');
+      const ok = kneeOk && (exState.phase === 'down' || exState.reachedTarget);
+
+      return {
+        ok,
+        statusMsg: issues.length ? issues[0] : (exState.phase === 'up' ? 'Sui talloni alzati — forma corretta' : 'Talloni a terra'),
+        metrics: [
+          { value: Math.round(ankleAngle) + '°', ok: exState.phase === 'up' ? exState.reachedTarget : null },
+          { value: Math.round(kneeAngle) + '°', ok: kneeOk }
+        ]
+      };
+    }
+  },
+
+  sidelunge: {
+    label: 'Affondo laterale',
+    mode: 'reps',
+    met: 4,
+    view: 'frontale',
+    viewNote: "Inquadrati frontalmente, a figura intera, con spazio ai lati per il passo laterale.",
+    howto: [
+      'In piedi, gambe unite, braccia libere per l\'equilibrio.',
+      'Fai un ampio passo laterale con una gamba e piega quel ginocchio, mantenendo l\'altra gamba tesa.',
+      'Il busto resta eretto, il ginocchio piegato non supera la punta del piede.',
+      'Spingi sul tallone della gamba piegata per tornare in piedi con le gambe unite.'
+    ],
+    metricLabels: ['Ginocchio più piegato', 'Busto'],
+    muscles: { visual:['thighs','hips'], text:['Quadricipiti','Glutei','Adduttori','Femorali'] },
+    thresholds: { kneeMin: 90, kneeDownEnter: 130, kneeUpExit: 160, backMax: 25 },
+    calib: {
+      // Vista frontale: a differenza di squat/affondo (vista laterale, un solo
+      // lato), qui entrambe le gambe sono visibili e non si sa in anticipo
+      // quale si piegherà — si prende sempre il MINIMO tra le due, cioè quella
+      // che in quel momento sta lavorando.
+      steps: [
+        { prompt: "Stai in piedi frontalmente alla fotocamera, gambe unite.",
+          sample(lm){
+            const a = al(lm);
+            const kneeL = angleBetween(a[23], a[25], a[27]);
+            const kneeR = angleBetween(a[24], a[26], a[28]);
+            const shMid = { x:(a[11].x+a[12].x)/2, y:(a[11].y+a[12].y)/2 };
+            const hipMid = { x:(a[23].x+a[24].x)/2, y:(a[23].y+a[24].y)/2 };
+            return { knee: Math.min(kneeL, kneeR), back: angleFromVertical(shMid, hipMid) };
+          } },
+        { prompt: "Fai l'affondo laterale più profondo che consideri corretto, su un lato, e resta fermo.",
+          sample(lm){
+            const a = al(lm);
+            const kneeL = angleBetween(a[23], a[25], a[27]);
+            const kneeR = angleBetween(a[24], a[26], a[28]);
+            const shMid = { x:(a[11].x+a[12].x)/2, y:(a[11].y+a[12].y)/2 };
+            const hipMid = { x:(a[23].x+a[24].x)/2, y:(a[23].y+a[24].y)/2 };
+            return { knee: Math.min(kneeL, kneeR), back: angleFromVertical(shMid, hipMid) };
+          } }
+      ],
+      apply(vals, t){
+        const standKnee = Math.max(vals[0].knee, vals[1].knee);
+        const deepKnee = Math.min(vals[0].knee, vals[1].knee);
+        if(standKnee - deepKnee < 20) return false;
+        const backRef = Math.max(vals[0].back, vals[1].back);
+        t.kneeMin = Math.max(60, Math.round(deepKnee - 10));
+        t.kneeDownEnter = Math.max(t.kneeMin + 15, Math.round((standKnee + deepKnee) / 2));
+        t.kneeUpExit = Math.max(t.kneeDownEnter + 10, Math.round(standKnee - 8));
+        t.backMax = Math.max(15, Math.round(backRef + 10));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const a = al(lm);
+      const lSh = a[11], rSh = a[12], lHip = a[23], rHip = a[24], lKnee = a[25], rKnee = a[26], lAnk = a[27], rAnk = a[28];
+      if(!lSh || !rSh || !lHip || !rHip || !lKnee || !rKnee || !lAnk || !rAnk) return null;
+      const kneeL = angleBetween(lHip, lKnee, lAnk);
+      const kneeR = angleBetween(rHip, rKnee, rAnk);
+      if(kneeL == null || kneeR == null) return null;
+      const kneeAngle = Math.min(kneeL, kneeR); // la gamba che sta piegandosi nell'affondo
+      const shMid = { x:(lSh.x+rSh.x)/2, y:(lSh.y+rSh.y)/2 };
+      const hipMid = { x:(lHip.x+rHip.x)/2, y:(lHip.y+rHip.y)/2 };
+      const backAngle = angleFromVertical(shMid, hipMid);
+
+      const kneeOk = kneeAngle >= t.kneeMin;
+      const backOk = backAngle <= t.backMax;
+      const issues = [];
+      if(!kneeOk) issues.push('Sei sceso troppo: rischio sul ginocchio, risali leggermente.');
+      if(!backOk) issues.push('Busto troppo inclinato: mantienilo eretto durante l\'affondo laterale.');
+      const ok = issues.length === 0;
+
+      if(exState.phase === undefined){ exState.phase = 'up'; exState.repHadIssue = false; exState.issueSince = null; }
+      if(exState.phase === 'up' && kneeAngle < t.kneeDownEnter){
+        exState.phase = 'down';
+        exState.repHadIssue = false;
+        exState.issueSince = null;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'down'){
+        trackFormIssue(issues.length > 0, issues[0]);
+        if(kneeAngle > t.kneeUpExit){
+          exState.phase = 'up';
+          const tooFast = repTooFast(exState.phaseStart);
+          const invalidParts = tooFast ? 'Movimento troppo rapido o instabile: ripetizione non conteggiata.' : rejectRepSequence(exState.lastIssueMsg);
+          completeRep(exState.repHadIssue || tooFast, invalidParts, 'Buon affondo laterale, ginocchio in asse.');
+          exState.repHadIssue = false;
+          exState.issueSince = null;
+        }
+      }
+
+      return {
+        ok,
+        statusMsg: issues.length ? issues[0] : (kneeAngle > t.kneeUpExit ? 'Posizione in piedi' : 'Affondo laterale — forma corretta'),
+        metrics: [
+          { value: Math.round(kneeAngle) + '°', ok: kneeOk },
+          { value: Math.round(backAngle) + '°', ok: backOk }
+        ]
+      };
+    }
+  },
+
+  superman: {
+    label: 'Superman',
+    mode: 'reps',
+    met: 3,
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, sdraiato a pancia in giù nell'inquadratura: serve vedere spalla, anca e ginocchio.",
+    howto: [
+      'Sdraiato a pancia in giù, braccia distese in avanti, gambe distese.',
+      'Solleva contemporaneamente petto, braccia e gambe da terra.',
+      'Resta un istante nella massima estensione, senza forzare il collo.',
+      'Scendi controllando il movimento fino a sfiorare terra.'
+    ],
+    metricLabels: ['Estensione schiena', 'Sollevamento'],
+    muscles: { visual:['core','hips'], text:['Lombari','Glutei','Femorali','Spalle'] },
+    // L'angolo spalla-anca-ginocchio è ~180° a terra disteso, e DIMINUISCE
+    // quando si solleva petto e gambe (l'anca resta il perno a terra) —
+    // esattamente l'opposto del ponte glutei, dove lo stesso angolo aumenta
+    // sollevando il bacino. liftMin è una soglia di sicurezza contro
+    // un'estensione eccessiva, non un bersaglio.
+    thresholds: { liftMin: 130, liftEnter: 165, restExit: 172, liftTargetMax: 158 },
+    calib: {
+      steps: [
+        { prompt: "Sdraiato a pancia in giù, completamente rilassato a terra.",
+          sample(lm){ const s = pickSide3D(lm); return { hip: angleBetween(s.shoulder, s.hip, s.knee) }; } },
+        { prompt: "Solleva petto e gambe più che puoi, in massima estensione.",
+          sample(lm){ const s = pickSide3D(lm); return { hip: angleBetween(s.shoulder, s.hip, s.knee) }; } }
+      ],
+      apply(vals, t){
+        const restAngle = Math.max(vals[0].hip, vals[1].hip);
+        const liftAngle = Math.min(vals[0].hip, vals[1].hip);
+        if(restAngle - liftAngle < 15) return false;
+        t.restExit = Math.round(restAngle - 5);
+        t.liftEnter = Math.round((restAngle + liftAngle) / 2);
+        t.liftTargetMax = Math.round(liftAngle + 6);
+        t.liftMin = Math.max(100, Math.round(liftAngle - 20));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide3D(lm);
+      const hipAngle = angleBetween(s.shoulder, s.hip, s.knee);
+      if(hipAngle == null) return null;
+
+      const safeOk = hipAngle >= t.liftMin;
+      const issues = [];
+      if(!safeOk) issues.push('Estensione eccessiva della schiena: non forzare oltre il naturale arco della schiena.');
+
+      if(exState.phase === undefined){ exState.phase = 'rest'; exState.repHadIssue = false; exState.issueSince = null; exState.reachedTarget = false; }
+      trackFormIssue(!safeOk, 'Estensione eccessiva della schiena: non forzare oltre il naturale arco della schiena.');
+      if(exState.phase === 'rest' && hipAngle < t.liftEnter){
+        exState.phase = 'lift';
+        exState.reachedTarget = false;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'lift'){
+        if(!exState.reachedTarget && hipAngle <= t.liftTargetMax) exState.reachedTarget = true;
+        if(hipAngle > t.restExit){
+          exState.phase = 'rest';
+          const tooFast = repTooFast(exState.phaseStart);
+          let invalidParts;
+          if(tooFast) invalidParts = 'Movimento troppo rapido o instabile: ripetizione non conteggiata.';
+          else if(!exState.reachedTarget) invalidParts = rejectRepSequence('Sollevamento insufficiente: alza di più petto e gambe.');
+          else if(exState.repHadIssue) invalidParts = rejectRepSequence(exState.lastIssueMsg);
+          completeRep(tooFast || !exState.reachedTarget || exState.repHadIssue, invalidParts, 'Buona estensione, schiena in sicurezza.');
+          exState.repHadIssue = false;
+          exState.issueSince = null;
+        }
+      }
+      if(exState.phase === 'lift' && !exState.reachedTarget) issues.push('Solleva di più petto e gambe per un\'estensione completa.');
+
+      const ok = safeOk && (exState.phase === 'rest' || exState.reachedTarget);
+
+      return {
+        ok,
+        statusMsg: issues.length ? issues[0] : (exState.phase === 'lift' ? 'Sollevato — forma corretta' : 'Posizione a terra'),
+        metrics: [
+          { value: Math.round(hipAngle) + '°', ok: safeOk },
+          { value: exState.phase === 'lift' ? (exState.reachedTarget ? 'Completo' : 'Parziale') : 'A terra', ok: exState.phase === 'lift' ? exState.reachedTarget : null }
+        ]
+      };
+    }
+  },
+
+  birddog: {
+    label: 'Bird-dog',
+    mode: 'reps',
+    met: 3,
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, a carponi nell'inquadratura: serve vedere anca, ginocchio e caviglia della gamba che estendi.",
+    howto: [
+      'A carponi, mani sotto le spalle, ginocchia sotto le anche.',
+      'Estendi all\'indietro una gamba fino a distenderla in linea con la schiena.',
+      'Insieme, estendi in avanti il braccio opposto: fa parte del movimento corretto, ma qui viene misurata solo la gamba, perché da una fotocamera laterale il braccio è spesso poco visibile.',
+      'Torna con il ginocchio sotto l\'anca e ripeti, alternando i lati.'
+    ],
+    metricLabels: ['Estensione gamba', 'Fase'],
+    muscles: { visual:['core','hips'], text:['Lombari','Glutei','Stabilizzatori del core'] },
+    // Misura deliberatamente solo l'estensione della gamba (angolo anca-
+    // ginocchio-caviglia), non il braccio opposto né l'allineamento della
+    // schiena: da un'unica fotocamera laterale fissa, il lato che si estende
+    // lontano dall'obiettivo è spesso parzialmente nascosto dal corpo, quindi
+    // pretendere di validare tutto il movimento (braccio incluso, simmetria
+    // sinistra/destra) darebbe un dato inaffidabile spacciato per preciso —
+    // meglio misurare bene una cosa sola che misurarne male diverse. Per lo
+    // stesso motivo non è nell'elenco degli esercizi con analisi di simmetria.
+    thresholds: { kneeTuckedMax: 110, kneeEnter: 130, kneeTargetMin: 155 },
+    calib: {
+      steps: [
+        { prompt: "A carponi, ginocchia sotto le anche, di lato alla fotocamera.",
+          sample(lm){ const s = pickSide3D(lm); return { knee: angleBetween(s.hip, s.knee, s.ankle) }; } },
+        { prompt: "Estendi una gamba all'indietro il più possibile e resta fermo.",
+          sample(lm){ const s = pickSide3D(lm); return { knee: angleBetween(s.hip, s.knee, s.ankle) }; } }
+      ],
+      apply(vals, t){
+        const tuckedAngle = Math.min(vals[0].knee, vals[1].knee);
+        const extendedAngle = Math.max(vals[0].knee, vals[1].knee);
+        if(extendedAngle - tuckedAngle < 25) return false;
+        t.kneeTuckedMax = Math.round(tuckedAngle + 10);
+        t.kneeEnter = Math.round((tuckedAngle + extendedAngle) / 2);
+        t.kneeTargetMin = Math.max(t.kneeEnter + 10, Math.round(extendedAngle - 10));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide3D(lm);
+      const kneeAngle = angleBetween(s.hip, s.knee, s.ankle);
+      if(kneeAngle == null) return null;
+
+      if(exState.phase === undefined){ exState.phase = 'tucked'; exState.reachedTarget = false; }
+      if(exState.phase === 'tucked' && kneeAngle > t.kneeEnter){
+        exState.phase = 'extended';
+        exState.reachedTarget = false;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'extended'){
+        if(!exState.reachedTarget && kneeAngle >= t.kneeTargetMin) exState.reachedTarget = true;
+        if(kneeAngle < t.kneeTuckedMax){
+          exState.phase = 'tucked';
+          const tooFast = repTooFast(exState.phaseStart);
+          let invalidParts;
+          if(tooFast) invalidParts = 'Movimento troppo rapido o instabile: ripetizione non conteggiata.';
+          else if(!exState.reachedTarget) invalidParts = rejectRepSequence('Estendi di più la gamba all\'indietro, fino a essere in linea con la schiena.');
+          completeRep(tooFast || !exState.reachedTarget, invalidParts, 'Buona estensione della gamba.');
+        }
+      }
+
+      return {
+        ok: exState.phase === 'tucked' || exState.reachedTarget,
+        statusMsg: exState.phase === 'extended' ? (exState.reachedTarget ? 'Gamba estesa — forma corretta' : 'Estendi di più') : 'Posizione a carponi',
+        metrics: [
+          { value: Math.round(kneeAngle) + '°', ok: exState.phase === 'extended' ? exState.reachedTarget : null },
+          { value: exState.phase === 'extended' ? 'Estesa' : 'Raccolta', ok: null }
+        ]
+      };
+    }
   }
 };
 
@@ -4362,7 +4782,8 @@ const EXERCISE_ICONS = {
   squat: '🏋️', lunge: '🚶', pushup: '💪', plank: '🪵',
   sideplank: '🤸', glutebridge: '🌉', jumpingjack: '🙆', mountainclimber: '⛰️',
   burpee: '⚡', crunch: '🌀', legraise: '🦵', russiantwist: '🌪️',
-  bicyclecrunch: '🚴', highknees: '🏃', wallsit: '🪑', chairdip: '⬇️'
+  bicyclecrunch: '🚴', highknees: '🏃', wallsit: '🪑', chairdip: '⬇️',
+  calfraise: '🦶', sidelunge: '↔️', superman: '🦸', birddog: '🐕'
 };
 
 // --- persistenza soglie personalizzate ---
@@ -4479,6 +4900,18 @@ function saveHistoryEntry(entry){
 
 function clearHistory(){
   try{ localStorage.removeItem(profKey(HISTORY_STORAGE_KEY)); } catch(e){ /* storage non disponibile */ }
+}
+
+// Elimina solo UNA riga della vista aggregata (un giorno + un esercizio),
+// non l'intera cronologia: rimuove tutte le voci grezze che vi contribuiscono
+// (una sessione spezzata da una ricalibrazione può averne più di una), le
+// altre righe restano intatte. Serve per correggere un allenamento registrato
+// per sbaglio (luce scarsa, contate sballate) senza perdere tutto il resto.
+function deleteHistoryDay(dateStr, key){
+  try{
+    const hist = loadHistory().filter(e => !(new Date(e.ts).toLocaleDateString('it-IT') === dateStr && e.key === key));
+    localStorage.setItem(profKey(HISTORY_STORAGE_KEY), JSON.stringify(hist));
+  } catch(e){ /* storage non disponibile */ }
 }
 
 // Salva nello storico l'attività dell'esercizio corrente, se ce n'è stata
@@ -5331,6 +5764,100 @@ ghostBtn.addEventListener('click', () => {
   try{ localStorage.setItem(GHOST_ENABLED_KEY, ghostEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
 });
 
+// --- sfida a tempo (AMRAP) ---
+// "As Many Reps As Possible": invece del solito traguardo a ripetizioni
+// (aperto, ti fermi quando vuoi), qui il tempo è fisso — 60 secondi — e conta
+// quante ripetizioni valide riesci a fare in quella finestra. Un formato di
+// allenamento diverso, non solo una variante del traguardo, quindi è un
+// interruttore a sé (come ghost/postura di riferimento) invece di un
+// ennesimo campo nel traguardo esistente.
+//
+// A tempo scaduto NON si ferma la sessione da sola: si limita ad annunciarlo
+// (voce + feedback + vibrazione) e a segnare il tentativo come "concluso", poi
+// è l'utente a toccare "Azzera" quando vuole vedere il risultato — stesso
+// principio già usato da handleGoalReached per il traguardo a ripetizioni
+// (festeggia, non decide al posto tuo), più sicuro che fermare la fotocamera
+// da dentro il ciclo di rendering che sta ancora elaborando il fotogramma.
+const AMRAP_ENABLED_KEY = 'formacheck_amrap_enabled_v1';
+const AMRAP_HISTORY_KEY = 'formacheck_amrap_v1';
+const AMRAP_DURATION_MS = 60000;
+let amrapEnabled = false;
+try{ amrapEnabled = localStorage.getItem(AMRAP_ENABLED_KEY) === '1'; } catch(e){ /* storage non disponibile */ }
+let amrapAnnouncedThisSession = false; // il tempo è già scaduto in QUESTA sessione (si resetta in stopSession)
+let amrapJustFinished = false; // consumato una volta sola dal prossimo riepilogo di sessione
+
+function loadAmrapHistory(){
+  try{
+    const raw = localStorage.getItem(profKey(AMRAP_HISTORY_KEY));
+    return raw ? JSON.parse(raw) : [];
+  } catch(e){ return []; }
+}
+function saveAmrapResult(exerciseKey, reps){
+  try{
+    const hist = loadAmrapHistory();
+    hist.push({ ts: Date.now(), key: exerciseKey, reps, durationS: Math.round(AMRAP_DURATION_MS / 1000) });
+    const trimmed = hist.length > 200 ? hist.slice(hist.length - 200) : hist;
+    localStorage.setItem(profKey(AMRAP_HISTORY_KEY), JSON.stringify(trimmed));
+  } catch(e){ /* storage non disponibile */ }
+}
+// Record personale SOLO sulla sfida a tempo: non è comparabile con
+// getPersonalRecord() (quello somma un'intera giornata a tempo libero,
+// questo è sempre esattamente 60 secondi), quindi resta una classifica separata.
+function getAmrapRecord(exerciseKey){
+  const rows = loadAmrapHistory().filter(e => e.key === exerciseKey);
+  if(rows.length === 0) return null;
+  return rows.reduce((best, e) => e.reps > best.reps ? e : best);
+}
+
+function updateAmrapBtn(){
+  const ex = EXERCISES[currentExercise];
+  const show = appMode === 'single' && ex.mode === 'reps';
+  amrapBtn.style.display = show ? 'block' : 'none';
+  if(!show){ amrapHint.style.display = 'none'; return; }
+  amrapBtn.textContent = amrapEnabled
+    ? '⏱️ Sfida a tempo (AMRAP) attiva — tocca per disattivare'
+    : '⏱️ Sfida a tempo (AMRAP) disattivata — tocca per attivare';
+  amrapBtn.classList.toggle('primary', amrapEnabled);
+  if(!amrapEnabled){ amrapHint.style.display = 'none'; return; }
+  const rec = getAmrapRecord(currentExercise);
+  amrapHint.style.display = 'block';
+  amrapHint.textContent = 'Hai 60 secondi fissi: conta quante ripetizioni valide fai in quella finestra.'
+    + (rec ? ' Il tuo record su questo esercizio: ' + rec.reps + ' ripetizioni.' : ' Nessun tentativo precedente su questo esercizio.');
+}
+updateAmrapBtn();
+
+amrapBtn.addEventListener('click', () => {
+  amrapEnabled = !amrapEnabled;
+  try{ localStorage.setItem(AMRAP_ENABLED_KEY, amrapEnabled ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
+  updateAmrapBtn();
+});
+
+// Chiamata una volta per fotogramma dal ciclo di rendering (dopo che
+// activeElapsedMs è già stato aggiornato quel fotogramma): conto alla
+// rovescia dal tempo sotto sforzo già tracciato altrove, invece di un
+// cronometro separato. Allo scadere annuncia e basta — non ferma la sessione
+// da sola (vedi il commento più su, vicino ad amrapEnabled, sul perché).
+// Estratta in una funzione a sé (non lasciata in linea nel ciclo) apposta
+// per poterla richiamare nei test con un tempo trascorso controllato, senza
+// dover simulare fotogrammi di camera reali.
+function tickAmrap(ex){
+  if(!(amrapEnabled && appMode === 'single' && ex.mode === 'reps')){
+    amrapCountdownRow.style.display = 'none';
+    return;
+  }
+  const remainingMs = Math.max(0, AMRAP_DURATION_MS - activeElapsedMs);
+  amrapCountdownRow.style.display = 'block';
+  amrapCountdownValue.textContent = formatRestTime(Math.ceil(remainingMs / 1000));
+  if(remainingMs <= 0 && !amrapAnnouncedThisSession){
+    amrapAnnouncedThisSession = true;
+    amrapJustFinished = true;
+    const repWord = repCount === 1 ? 'ripetizione valida' : 'ripetizioni valide';
+    pushFeedback('⏱️ Tempo scaduto! ' + repCount + ' ' + repWord + ' in 60 secondi. Tocca "Azzera" per vedere il risultato.', true);
+    speak('Tempo scaduto. ' + repCount + ' ' + (repCount === 1 ? 'ripetizione' : 'ripetizioni') + '.');
+    hapticCelebrate();
+  }
+}
+
 // --- timer di riposo ---
 function playBeep(){
   try{
@@ -5552,6 +6079,14 @@ const BUILTIN_COURSES = [
     { key: 'burpee', target: 12 }, { key: 'squat', target: 15 },
     { key: 'pushup', target: 12 }, { key: 'mountainclimber', target: 24 },
     { key: 'highknees', target: 30 }
+  ] },
+  { id: 'schiena-core', icon: '🧘', name: 'Schiena e Core', tagline: 'Catena posteriore e addome, ritmo controllato.', rest: 30, steps: [
+    { key: 'superman', target: 12 }, { key: 'birddog', target: 10 },
+    { key: 'plank', target: 30 }, { key: 'crunch', target: 15 }
+  ] },
+  { id: 'gambe-complete', icon: '🦿', name: 'Gambe Complete', tagline: 'Quadricipiti, adduttori, polpacci e glutei in un solo giro.', rest: 45, steps: [
+    { key: 'squat', target: 12 }, { key: 'sidelunge', target: 10 },
+    { key: 'calfraise', target: 15 }, { key: 'glutebridge', target: 15 }
   ] }
 ];
 
@@ -6058,6 +6593,7 @@ function updateGoalUI(){
     apreBtn.style.display = 'none'; apreHint.style.display = 'none';
     clusterBtn.style.display = 'none'; clusterConfigRow.style.display = 'none'; clusterHint.style.display = 'none';
     periodizationBtn.style.display = 'none'; periodizationHint.style.display = 'none'; periodizationBadge.style.display = 'none';
+    amrapBtn.style.display = 'none'; amrapHint.style.display = 'none';
     return;
   }
   const ex = EXERCISES[currentExercise];
@@ -6077,6 +6613,7 @@ function updateGoalUI(){
   updateApreBtn();
   updateClusterBtn();
   updatePeriodizationBtn();
+  updateAmrapBtn();
 }
 
 // L'autoregolazione APRE ha senso solo con più serie dello stesso esercizio
@@ -6604,9 +7141,21 @@ function wireSettingsGroup(toggleId, bodyId, storageKey, defaultExpanded){
     try{ localStorage.setItem(storageKey, expanded ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
   });
 }
+// Aperto di default (a differenza degli altri gruppi): il riscaldamento era
+// sempre visibile prima di finire in questo gruppo, e nasconderlo dietro un
+// tocco in più andrebbe contro il motivo per cui esiste — un promemoria
+// pronto all'uso appena prima di iniziare, non un'opzione da riscoprire.
+wireSettingsGroup('prepToggle', 'prepBody', 'formacheck_group_prep_v1', true);
 wireSettingsGroup('advancedTrainingToggle', 'advancedTrainingBody', 'formacheck_group_advanced_v1', apreEnabled || clusterEnabled || periodizationEnabled);
 wireSettingsGroup('voiceAccessibilityToggle', 'voiceAccessibilityBody', 'formacheck_group_voice_v1', captionsEnabled || voiceCommandEnabled);
 wireSettingsGroup('historyDataToggle', 'historyDataBody', 'formacheck_group_history_v1', false);
+// Aperto di default se il promemoria è già attivo, così resta a portata di
+// mano invece di sparire dietro un tocco in più proprio mentre lo si usa.
+wireSettingsGroup('goalExtrasToggle', 'goalExtrasBody', 'formacheck_group_goalextras_v1', reminderEnabled);
+// Aperto di default finché il benessere di oggi non è ancora stato
+// registrato (un piccolo invito a farlo), chiuso una volta compilato.
+wireSettingsGroup('wellnessToggle', 'wellnessSection', 'formacheck_group_wellness_v1', !loadWellness()[todayKey()]);
+wireSettingsGroup('advancedAnalysisToggle', 'advancedAnalysisBody', 'formacheck_group_advanalysis_v1', false);
 
 function resetMetrics(){
   logSessionIfActive();
@@ -6647,6 +7196,9 @@ function stopSession(){
   announcedRecurringFor = new Set();
   pairCalibPendingSlot = null;
   calibTargetSlot = null;
+  amrapAnnouncedThisSession = false; // pronto per un eventuale prossimo tentativo AMRAP
+  amrapJustFinished = false; // già letto (se c'era) dal riepilogo appena mostrato
+  amrapCountdownRow.style.display = 'none';
   if(reactionTestActive) stopReactionTest(); // la fotocamera si sta fermando: non ha senso lasciare il test in corso
   if(postureCheckActive) stopPostureCheck(); // idem per il check-up posturale
 
@@ -6738,6 +7290,18 @@ function showSessionSummary(onClose){
     summaryText += repCount + ' ripetizioni valide';
     if(invalidRepCount > 0) summaryText += ', ' + invalidRepCount + ' scartate';
     if(accuracy != null) summaryText += ' (' + accuracy + '% di precisione)';
+
+    // Riga dedicata SOLO se il tempo dell'AMRAP è davvero scaduto (amrapJustFinished),
+    // non se si è solo toccato "Azzera" a metà con la sfida ancora attiva: un
+    // tentativo interrotto a metà non è un dato onesto da confrontare con gli altri.
+    if(amrapJustFinished){
+      const prevRecord = getAmrapRecord(currentExercise);
+      const isNewRecord = !prevRecord || repCount > prevRecord.reps;
+      const recordText = isNewRecord ? 'nuovo record! 🏆' : ('record: ' + prevRecord.reps + ' ripetizioni');
+      addRow('⏱️ Sfida a tempo (60s)', repCount + ' ripetizioni — ' + recordText);
+      summaryText += '\n⏱️ Sfida a tempo (60s): ' + repCount + ' ripetizioni' + (isNewRecord ? ' — nuovo record!' : ' (record: ' + prevRecord.reps + ')');
+      saveAmrapResult(currentExercise, repCount);
+    }
   } else {
     const timeStr = formatRestTime(Math.round(timerSeconds));
     cardBig = timeStr;
@@ -6785,6 +7349,11 @@ function showSessionSummary(onClose){
 
   sessionSummaryOverlay.style.display = 'flex';
   sessionSummaryShareBtn.onclick = () => shareCard({ heading: ex.label, big: cardBig, bigLabel: cardBigLabel, rows: cardRows }, summaryText);
+  sessionSummaryCooldownBtn.onclick = () => {
+    sessionSummaryOverlay.style.display = 'none';
+    onClose();
+    startCooldown();
+  };
   sessionSummaryCloseBtn.onclick = () => {
     sessionSummaryOverlay.style.display = 'none';
     onClose();
@@ -7025,6 +7594,8 @@ function renderHistoryChart(){
     const best = withData.reduce((a, b) => b.volume > a.volume ? b : a);
     historyChartRecord.textContent = '🏆 Record del periodo: ' + formatHistoryVolume(best.volume, historyChartExercise) + ' — ' + best.rangeLabel;
   }
+
+  renderMuscleZonePanel(); // stesso periodo del grafico, così le due viste restano coerenti
 }
 
 // Esercizi dove i due lati del corpo sono davvero confrontabili nello
@@ -7077,6 +7648,72 @@ function renderSymmetryPanel(){
   });
 }
 
+// --- statistiche per zona muscolare ------------------------------------
+// Stessa finestra temporale già scelta per il grafico sopra (14 giorni / 3
+// mesi / 12 mesi): calcola solo l'inizio del periodo, non i singoli bucket,
+// perché qui serve un totale per zona, non un andamento nel tempo.
+function historyPeriodStartMs(period){
+  const now = new Date();
+  if(period === 'y1') return new Date(now.getFullYear(), now.getMonth() - 11, 1).getTime();
+  if(period === 'm3'){
+    const monday = new Date(now);
+    monday.setHours(0, 0, 0, 0);
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) - 11 * 7);
+    return monday.getTime();
+  }
+  const d = new Date(now); // 'w2'
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - 13);
+  return d.getTime();
+}
+
+// Attribuisce i minuti attivi di ogni sessione a tutte le zone coinvolte da
+// quell'esercizio (muscles.visual, la stessa lista già usata per scegliere
+// le mosse di riscaldamento e la varietà del "Piano di oggi"): un esercizio
+// che lavora più zone insieme conta per intero su ognuna, non diviso tra
+// loro — un indicatore di quanto è stata sollecitata, non una stima
+// anatomica precisa di lavoro muscolare specifico.
+function computeMuscleZoneStats(period){
+  const startMs = historyPeriodStartMs(period);
+  const totals = {};
+  Object.keys(MUSCLE_REGION_LABELS).forEach(r => { totals[r] = 0; });
+  loadHistory().forEach(e => {
+    if(e.ts < startMs) return;
+    const ex = EXERCISES[e.key];
+    if(!ex) return;
+    const ms = e.activeMs || 0;
+    ex.muscles.visual.forEach(r => { totals[r] = (totals[r] || 0) + ms; });
+  });
+  return Object.keys(totals)
+    .map(region => ({ region, ms: totals[region] }))
+    .sort((a, b) => b.ms - a.ms);
+}
+
+function renderMuscleZonePanel(){
+  const stats = computeMuscleZoneStats(historyChartPeriod);
+  const max = Math.max(1, ...stats.map(s => s.ms));
+  const totalMs = stats.reduce((sum, s) => sum + s.ms, 0);
+  muscleZonePanel.innerHTML = '';
+  if(totalMs === 0){
+    const empty = document.createElement('div');
+    empty.className = 'calib-hint';
+    empty.textContent = 'Ancora nessun dato in questo periodo: le zone allenate compariranno qui dopo la prima sessione.';
+    muscleZonePanel.appendChild(empty);
+    return;
+  }
+  stats.forEach(({ region, ms }) => {
+    const pct = ms > 0 ? Math.max(4, Math.round((ms / max) * 100)) : 0;
+    const minutes = Math.round(ms / 60000);
+    const row = document.createElement('div');
+    row.className = 'musclezone-row';
+    row.innerHTML =
+      '<span class="musclezone-row-label">' + (MUSCLE_REGION_LABELS[region] || region) + '</span>' +
+      '<span class="musclezone-bar-track"><span class="musclezone-bar-fill" style="width:' + pct + '%;"></span></span>' +
+      '<span class="musclezone-row-value">' + (ms > 0 ? minutes + ' min' : '—') + '</span>';
+    muscleZonePanel.appendChild(row);
+  });
+}
+
 function renderHistory(){
   renderGoalPanel();
   populateHistoryExerciseFilter();
@@ -7101,10 +7738,23 @@ function renderHistory(){
       : formatRestTime(r.seconds) + ' in tenuta corretta')
       + (r.avgQuality != null ? ' · qualità ' + r.avgQuality : '')
       + (r.avgVelocityMps != null ? ' · vel. ' + r.avgVelocityMps.toFixed(2) + ' m/s' : '');
-    row.innerHTML = '<span>' + r.dateStr + ' — ' + r.label + '</span><span>' + detail + '</span>';
+    row.innerHTML =
+      '<span style="flex:1; min-width:0; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">' +
+        '<span>' + r.dateStr + ' — ' + r.label + '</span>' +
+        '<span>' + detail + '</span>' +
+      '</span>' +
+      '<button class="calib-skip" data-action="delete" data-date="' + r.dateStr + '" data-key="' + r.key + '" data-label="' + r.label + '" style="flex-shrink:0;" aria-label="Elimina questa voce dalla cronologia" title="Elimina questa voce dalla cronologia">✕</button>';
     historyList.appendChild(row);
   });
 }
+
+historyList.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-action="delete"]');
+  if(!btn) return;
+  if(!confirm('Eliminare la voce del ' + btn.dataset.date + ' per "' + btn.dataset.label + '"? Non si può annullare.')) return;
+  deleteHistoryDay(btn.dataset.date, btn.dataset.key);
+  renderHistory();
+});
 
 // Esporta l'intera cronologia grezza come CSV, scaricabile e apribile in
 // qualunque foglio di calcolo — così i dati non si perdono se si cancellano
@@ -7507,7 +8157,7 @@ const PROFILE_PERSONAL_KEYS = [
   THRESH_STORAGE_KEY, PAIR_THRESH_STORAGE_KEY, HISTORY_STORAGE_KEY,
   GOAL_STORAGE_KEY, WEIGHT_STORAGE_KEY, PROGRAMS_STORAGE_KEY,
   GHOST_STORAGE_KEY, REACTION_HISTORY_KEY, POSTURE_CHECK_HISTORY_KEY,
-  WELLNESS_STORAGE_KEY
+  WELLNESS_STORAGE_KEY, AMRAP_HISTORY_KEY
 ];
 function keyForProfile(baseKey, id){
   return id === DEFAULT_PROFILE_ID ? baseKey : baseKey + '__' + id;
@@ -8474,6 +9124,8 @@ function renderLoop(){
       activeElapsedMs += activeTickNow - lastActiveTick;
       lastActiveTick = activeTickNow;
 
+      tickAmrap(ex);
+
       if(refPoseEnabled) drawReferenceOverlay(lm, ex.refPose);
       if(ghostEnabled) drawReferenceOverlay(lm, getGhostPoseFor(currentExercise), '#c084fc');
       drawSkeleton(lm, evalResult.ok);
@@ -8759,9 +9411,88 @@ warmupBtn.addEventListener('click', () => {
 });
 warmupSkipBtn.addEventListener('click', skipWarmup);
 
+// --- defaticamento guidato dopo l'allenamento ---
+// Speculare al riscaldamento (stessa infrastruttura, stesso schema regione
+// muscolare -> mossa), ma con stiramenti statici invece di mobilità dinamica,
+// tenuta più lunga (25s invece di 20s, più realistica per uno stretching), e
+// proposto a fine sessione (dal riepilogo) invece che prima di iniziare.
+const COOLDOWN_MOVES = {
+  shoulders: { name: 'Stretching delle spalle', instruction: "Porta un braccio disteso davanti al petto e tienilo con l'altro braccio, senza forzare." },
+  arms: { name: 'Stretching dei tricipiti', instruction: 'Porta una mano dietro la nuca e spingi delicatamente il gomito con l\'altra mano.' },
+  chest: { name: 'Stretching del petto', instruction: 'Intreccia le mani dietro la schiena e apri il petto in avanti.' },
+  core: { name: 'Torsione da seduto', instruction: 'Seduto, ruota lentamente il busto verso un lato mantenendo la posizione, poi cambia lato.' },
+  hips: { name: 'Stretching dei flessori dell\'anca', instruction: 'In affondo basso, spingi delicatamente il bacino in avanti mantenendo il busto eretto.' },
+  thighs: { name: 'Stretching dei quadricipiti', instruction: 'In piedi, porta un tallone verso il gluteo tenendolo con una mano, senza perdere l\'equilibrio.' },
+  calves: { name: 'Stretching dei polpacci', instruction: 'Un passo indietro con una gamba, tallone a terra, spingi il tallone verso il pavimento.' }
+};
+const COOLDOWN_STEP_SECONDS = 25;
+let cooldownActive = false;
+let cooldownTimerId = null;
+
+function pickCooldownMoves(exerciseKey){
+  const ex = EXERCISES[exerciseKey];
+  if(!ex) return [];
+  const seen = new Set();
+  const moves = [];
+  ex.muscles.visual.forEach(region => {
+    const move = COOLDOWN_MOVES[region];
+    if(move && !seen.has(region)){
+      seen.add(region);
+      moves.push(move);
+    }
+  });
+  return moves.slice(0, 3);
+}
+
+function runCooldownStep(moves, index){
+  if(!cooldownActive) return;
+  if(index >= moves.length){
+    cooldownActive = false;
+    speak('Defaticamento completato. Ottimo lavoro.');
+    pushFeedback('🧘 Defaticamento completato — ottimo lavoro.', true);
+    cooldownOverlay.style.display = 'none';
+    return;
+  }
+  const move = moves[index];
+  cooldownMoveLabel.textContent = move.name;
+  cooldownMoveHint.textContent = move.instruction;
+  speak(move.name + '. ' + move.instruction);
+  let remaining = COOLDOWN_STEP_SECONDS;
+  cooldownCountdown.textContent = remaining;
+  clearInterval(cooldownTimerId);
+  cooldownTimerId = setInterval(() => {
+    remaining--;
+    cooldownCountdown.textContent = Math.max(0, remaining);
+    if(remaining > 0 && remaining <= 3) speak(String(remaining));
+    if(remaining <= 0){
+      clearInterval(cooldownTimerId);
+      runCooldownStep(moves, index + 1);
+    }
+  }, 1000);
+}
+
+function startCooldown(){
+  const moves = pickCooldownMoves(currentExercise);
+  if(moves.length === 0) return; // difensivo: ogni esercizio ha almeno un gruppo muscolare in muscles.visual
+  cooldownActive = true;
+  cooldownOverlay.style.display = 'flex';
+  runCooldownStep(moves, 0);
+}
+
+function skipCooldown(){
+  cooldownActive = false;
+  clearInterval(cooldownTimerId);
+  cooldownTimerId = null;
+  cooldownOverlay.style.display = 'none';
+  clearSpeechQueue();
+}
+
+cooldownSkipBtn.addEventListener('click', skipCooldown);
+
 startBtn.addEventListener('click', async () => {
   if(onboardingOverlay.style.display !== 'none') closeOnboarding(); // avviare la fotocamera chiude subito la guida, se ancora aperta
   if(warmupActive) skipWarmup(); // avviare la fotocamera interrompe un riscaldamento ancora in corso
+  if(cooldownActive) skipCooldown(); // idem per un defaticamento ancora in corso
   startBtn.disabled = true;
   startBtn.textContent = 'Avvio…';
 
