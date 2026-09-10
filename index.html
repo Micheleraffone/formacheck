@@ -4398,6 +4398,347 @@ const EXERCISES = {
         metrics: [{ value: Math.round(elbowAngle) + '°', ok: elbowOk }]
       };
     }
+  },
+
+  calfraise: {
+    label: 'Slanci al polpaccio',
+    mode: 'reps',
+    met: 3,
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, a figura intera: serve vedere il profilo del piede e della caviglia.",
+    howto: [
+      'In piedi, gambe dritte, appoggiati a una superficie se ti serve equilibrio.',
+      'Solleva i talloni spingendo sulle punte dei piedi, il più in alto possibile.',
+      'Resta un istante in massima estensione della caviglia.',
+      'Scendi lentamente fino a riappoggiare i talloni a terra.'
+    ],
+    metricLabels: ['Caviglia', 'Ginocchio'],
+    muscles: { visual:['calves'], text:['Gastrocnemio', 'Soleo'] },
+    // A differenza di squat/affondo, qui il ginocchio NON deve piegarsi: se lo
+    // fa, il movimento diventa un mini-squat invece di un vero slancio sui
+    // polpacci. kneeMin è quindi una soglia di sicurezza contro questo, non un
+    // bersaglio da raggiungere come per gli altri esercizi.
+    thresholds: { kneeMin: 165, ankleDownExit: 100, ankleUpEnter: 120, ankleTargetMin: 140 },
+    calib: {
+      steps: [
+        { prompt: "Stai in piedi, gambe dritte, talloni a terra, di lato alla fotocamera.",
+          sample(lm){ const s = pickSide3D(lm); return { ankle: angleBetween(s.knee, s.ankle, s.toe), knee: angleBetween(s.hip, s.knee, s.ankle) }; } },
+        { prompt: "Sali sulle punte dei piedi il più in alto possibile e resta fermo.",
+          sample(lm){ const s = pickSide3D(lm); return { ankle: angleBetween(s.knee, s.ankle, s.toe), knee: angleBetween(s.hip, s.knee, s.ankle) }; } }
+      ],
+      apply(vals, t){
+        const ankleLow = Math.min(vals[0].ankle, vals[1].ankle);
+        const ankleHigh = Math.max(vals[0].ankle, vals[1].ankle);
+        if(ankleHigh - ankleLow < 15) return false; // movimento troppo simile tra i due passi: non calibro
+        const kneeRef = Math.min(vals[0].knee, vals[1].knee); // il ginocchio deve restare vicino a questo per tutto il movimento
+        t.kneeMin = Math.max(140, Math.round(kneeRef - 15));
+        t.ankleDownExit = Math.round(ankleLow + 8);
+        t.ankleUpEnter = Math.max(t.ankleDownExit + 8, Math.round((ankleLow + ankleHigh) / 2));
+        t.ankleTargetMin = Math.max(t.ankleUpEnter + 5, Math.round(ankleHigh - 8));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide3D(lm);
+      const ankleAngle = angleBetween(s.knee, s.ankle, s.toe);
+      const kneeAngle = angleBetween(s.hip, s.knee, s.ankle);
+      if(ankleAngle == null || kneeAngle == null) return null;
+
+      const kneeOk = kneeAngle >= t.kneeMin;
+      const issues = [];
+      if(!kneeOk) issues.push('Non piegare le ginocchia: il movimento deve venire solo dalla caviglia.');
+
+      if(exState.phase === undefined){ exState.phase = 'down'; exState.repHadIssue = false; exState.issueSince = null; exState.reachedTarget = false; }
+      trackFormIssue(!kneeOk, 'Non piegare le ginocchia: il movimento deve venire solo dalla caviglia.');
+      if(exState.phase === 'down' && ankleAngle > t.ankleUpEnter){
+        exState.phase = 'up';
+        exState.reachedTarget = false;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'up'){
+        if(!exState.reachedTarget && ankleAngle >= t.ankleTargetMin) exState.reachedTarget = true;
+        if(ankleAngle < t.ankleDownExit){
+          exState.phase = 'down';
+          const tooFast = repTooFast(exState.phaseStart);
+          let invalidParts;
+          if(tooFast) invalidParts = 'Movimento troppo rapido o instabile: ripetizione non conteggiata.';
+          else if(!exState.reachedTarget) invalidParts = rejectRepSequence('Sali di più sulle punte per estendere bene la caviglia.');
+          else if(exState.repHadIssue) invalidParts = rejectRepSequence(exState.lastIssueMsg);
+          completeRep(tooFast || !exState.reachedTarget || exState.repHadIssue, invalidParts, 'Buona estensione della caviglia.');
+          exState.repHadIssue = false;
+          exState.issueSince = null;
+        }
+      }
+      if(exState.phase === 'up' && !exState.reachedTarget) issues.push('Sali di più sulle punte per estendere bene la caviglia.');
+      const ok = kneeOk && (exState.phase === 'down' || exState.reachedTarget);
+
+      return {
+        ok,
+        statusMsg: issues.length ? issues[0] : (exState.phase === 'up' ? 'Sui talloni alzati — forma corretta' : 'Talloni a terra'),
+        metrics: [
+          { value: Math.round(ankleAngle) + '°', ok: exState.phase === 'up' ? exState.reachedTarget : null },
+          { value: Math.round(kneeAngle) + '°', ok: kneeOk }
+        ]
+      };
+    }
+  },
+
+  sidelunge: {
+    label: 'Affondo laterale',
+    mode: 'reps',
+    met: 4,
+    view: 'frontale',
+    viewNote: "Inquadrati frontalmente, a figura intera, con spazio ai lati per il passo laterale.",
+    howto: [
+      'In piedi, gambe unite, braccia libere per l\'equilibrio.',
+      'Fai un ampio passo laterale con una gamba e piega quel ginocchio, mantenendo l\'altra gamba tesa.',
+      'Il busto resta eretto, il ginocchio piegato non supera la punta del piede.',
+      'Spingi sul tallone della gamba piegata per tornare in piedi con le gambe unite.'
+    ],
+    metricLabels: ['Ginocchio più piegato', 'Busto'],
+    muscles: { visual:['thighs','hips'], text:['Quadricipiti','Glutei','Adduttori','Femorali'] },
+    thresholds: { kneeMin: 90, kneeDownEnter: 130, kneeUpExit: 160, backMax: 25 },
+    calib: {
+      // Vista frontale: a differenza di squat/affondo (vista laterale, un solo
+      // lato), qui entrambe le gambe sono visibili e non si sa in anticipo
+      // quale si piegherà — si prende sempre il MINIMO tra le due, cioè quella
+      // che in quel momento sta lavorando.
+      steps: [
+        { prompt: "Stai in piedi frontalmente alla fotocamera, gambe unite.",
+          sample(lm){
+            const a = al(lm);
+            const kneeL = angleBetween(a[23], a[25], a[27]);
+            const kneeR = angleBetween(a[24], a[26], a[28]);
+            const shMid = { x:(a[11].x+a[12].x)/2, y:(a[11].y+a[12].y)/2 };
+            const hipMid = { x:(a[23].x+a[24].x)/2, y:(a[23].y+a[24].y)/2 };
+            return { knee: Math.min(kneeL, kneeR), back: angleFromVertical(shMid, hipMid) };
+          } },
+        { prompt: "Fai l'affondo laterale più profondo che consideri corretto, su un lato, e resta fermo.",
+          sample(lm){
+            const a = al(lm);
+            const kneeL = angleBetween(a[23], a[25], a[27]);
+            const kneeR = angleBetween(a[24], a[26], a[28]);
+            const shMid = { x:(a[11].x+a[12].x)/2, y:(a[11].y+a[12].y)/2 };
+            const hipMid = { x:(a[23].x+a[24].x)/2, y:(a[23].y+a[24].y)/2 };
+            return { knee: Math.min(kneeL, kneeR), back: angleFromVertical(shMid, hipMid) };
+          } }
+      ],
+      apply(vals, t){
+        const standKnee = Math.max(vals[0].knee, vals[1].knee);
+        const deepKnee = Math.min(vals[0].knee, vals[1].knee);
+        if(standKnee - deepKnee < 20) return false;
+        const backRef = Math.max(vals[0].back, vals[1].back);
+        t.kneeMin = Math.max(60, Math.round(deepKnee - 10));
+        t.kneeDownEnter = Math.max(t.kneeMin + 15, Math.round((standKnee + deepKnee) / 2));
+        t.kneeUpExit = Math.max(t.kneeDownEnter + 10, Math.round(standKnee - 8));
+        t.backMax = Math.max(15, Math.round(backRef + 10));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const a = al(lm);
+      const lSh = a[11], rSh = a[12], lHip = a[23], rHip = a[24], lKnee = a[25], rKnee = a[26], lAnk = a[27], rAnk = a[28];
+      if(!lSh || !rSh || !lHip || !rHip || !lKnee || !rKnee || !lAnk || !rAnk) return null;
+      const kneeL = angleBetween(lHip, lKnee, lAnk);
+      const kneeR = angleBetween(rHip, rKnee, rAnk);
+      if(kneeL == null || kneeR == null) return null;
+      const kneeAngle = Math.min(kneeL, kneeR); // la gamba che sta piegandosi nell'affondo
+      const shMid = { x:(lSh.x+rSh.x)/2, y:(lSh.y+rSh.y)/2 };
+      const hipMid = { x:(lHip.x+rHip.x)/2, y:(lHip.y+rHip.y)/2 };
+      const backAngle = angleFromVertical(shMid, hipMid);
+
+      const kneeOk = kneeAngle >= t.kneeMin;
+      const backOk = backAngle <= t.backMax;
+      const issues = [];
+      if(!kneeOk) issues.push('Sei sceso troppo: rischio sul ginocchio, risali leggermente.');
+      if(!backOk) issues.push('Busto troppo inclinato: mantienilo eretto durante l\'affondo laterale.');
+      const ok = issues.length === 0;
+
+      if(exState.phase === undefined){ exState.phase = 'up'; exState.repHadIssue = false; exState.issueSince = null; }
+      if(exState.phase === 'up' && kneeAngle < t.kneeDownEnter){
+        exState.phase = 'down';
+        exState.repHadIssue = false;
+        exState.issueSince = null;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'down'){
+        trackFormIssue(issues.length > 0, issues[0]);
+        if(kneeAngle > t.kneeUpExit){
+          exState.phase = 'up';
+          const tooFast = repTooFast(exState.phaseStart);
+          const invalidParts = tooFast ? 'Movimento troppo rapido o instabile: ripetizione non conteggiata.' : rejectRepSequence(exState.lastIssueMsg);
+          completeRep(exState.repHadIssue || tooFast, invalidParts, 'Buon affondo laterale, ginocchio in asse.');
+          exState.repHadIssue = false;
+          exState.issueSince = null;
+        }
+      }
+
+      return {
+        ok,
+        statusMsg: issues.length ? issues[0] : (kneeAngle > t.kneeUpExit ? 'Posizione in piedi' : 'Affondo laterale — forma corretta'),
+        metrics: [
+          { value: Math.round(kneeAngle) + '°', ok: kneeOk },
+          { value: Math.round(backAngle) + '°', ok: backOk }
+        ]
+      };
+    }
+  },
+
+  superman: {
+    label: 'Superman',
+    mode: 'reps',
+    met: 3,
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, sdraiato a pancia in giù nell'inquadratura: serve vedere spalla, anca e ginocchio.",
+    howto: [
+      'Sdraiato a pancia in giù, braccia distese in avanti, gambe distese.',
+      'Solleva contemporaneamente petto, braccia e gambe da terra.',
+      'Resta un istante nella massima estensione, senza forzare il collo.',
+      'Scendi controllando il movimento fino a sfiorare terra.'
+    ],
+    metricLabels: ['Estensione schiena', 'Sollevamento'],
+    muscles: { visual:['core','hips'], text:['Lombari','Glutei','Femorali','Spalle'] },
+    // L'angolo spalla-anca-ginocchio è ~180° a terra disteso, e DIMINUISCE
+    // quando si solleva petto e gambe (l'anca resta il perno a terra) —
+    // esattamente l'opposto del ponte glutei, dove lo stesso angolo aumenta
+    // sollevando il bacino. liftMin è una soglia di sicurezza contro
+    // un'estensione eccessiva, non un bersaglio.
+    thresholds: { liftMin: 130, liftEnter: 165, restExit: 172, liftTargetMax: 158 },
+    calib: {
+      steps: [
+        { prompt: "Sdraiato a pancia in giù, completamente rilassato a terra.",
+          sample(lm){ const s = pickSide3D(lm); return { hip: angleBetween(s.shoulder, s.hip, s.knee) }; } },
+        { prompt: "Solleva petto e gambe più che puoi, in massima estensione.",
+          sample(lm){ const s = pickSide3D(lm); return { hip: angleBetween(s.shoulder, s.hip, s.knee) }; } }
+      ],
+      apply(vals, t){
+        const restAngle = Math.max(vals[0].hip, vals[1].hip);
+        const liftAngle = Math.min(vals[0].hip, vals[1].hip);
+        if(restAngle - liftAngle < 15) return false;
+        t.restExit = Math.round(restAngle - 5);
+        t.liftEnter = Math.round((restAngle + liftAngle) / 2);
+        t.liftTargetMax = Math.round(liftAngle + 6);
+        t.liftMin = Math.max(100, Math.round(liftAngle - 20));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide3D(lm);
+      const hipAngle = angleBetween(s.shoulder, s.hip, s.knee);
+      if(hipAngle == null) return null;
+
+      const safeOk = hipAngle >= t.liftMin;
+      const issues = [];
+      if(!safeOk) issues.push('Estensione eccessiva della schiena: non forzare oltre il naturale arco della schiena.');
+
+      if(exState.phase === undefined){ exState.phase = 'rest'; exState.repHadIssue = false; exState.issueSince = null; exState.reachedTarget = false; }
+      trackFormIssue(!safeOk, 'Estensione eccessiva della schiena: non forzare oltre il naturale arco della schiena.');
+      if(exState.phase === 'rest' && hipAngle < t.liftEnter){
+        exState.phase = 'lift';
+        exState.reachedTarget = false;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'lift'){
+        if(!exState.reachedTarget && hipAngle <= t.liftTargetMax) exState.reachedTarget = true;
+        if(hipAngle > t.restExit){
+          exState.phase = 'rest';
+          const tooFast = repTooFast(exState.phaseStart);
+          let invalidParts;
+          if(tooFast) invalidParts = 'Movimento troppo rapido o instabile: ripetizione non conteggiata.';
+          else if(!exState.reachedTarget) invalidParts = rejectRepSequence('Sollevamento insufficiente: alza di più petto e gambe.');
+          else if(exState.repHadIssue) invalidParts = rejectRepSequence(exState.lastIssueMsg);
+          completeRep(tooFast || !exState.reachedTarget || exState.repHadIssue, invalidParts, 'Buona estensione, schiena in sicurezza.');
+          exState.repHadIssue = false;
+          exState.issueSince = null;
+        }
+      }
+      if(exState.phase === 'lift' && !exState.reachedTarget) issues.push('Solleva di più petto e gambe per un\'estensione completa.');
+
+      const ok = safeOk && (exState.phase === 'rest' || exState.reachedTarget);
+
+      return {
+        ok,
+        statusMsg: issues.length ? issues[0] : (exState.phase === 'lift' ? 'Sollevato — forma corretta' : 'Posizione a terra'),
+        metrics: [
+          { value: Math.round(hipAngle) + '°', ok: safeOk },
+          { value: exState.phase === 'lift' ? (exState.reachedTarget ? 'Completo' : 'Parziale') : 'A terra', ok: exState.phase === 'lift' ? exState.reachedTarget : null }
+        ]
+      };
+    }
+  },
+
+  birddog: {
+    label: 'Bird-dog',
+    mode: 'reps',
+    met: 3,
+    view: 'laterale',
+    viewNote: "Inquadrati di lato, a carponi nell'inquadratura: serve vedere anca, ginocchio e caviglia della gamba che estendi.",
+    howto: [
+      'A carponi, mani sotto le spalle, ginocchia sotto le anche.',
+      'Estendi all\'indietro una gamba fino a distenderla in linea con la schiena.',
+      'Insieme, estendi in avanti il braccio opposto: fa parte del movimento corretto, ma qui viene misurata solo la gamba, perché da una fotocamera laterale il braccio è spesso poco visibile.',
+      'Torna con il ginocchio sotto l\'anca e ripeti, alternando i lati.'
+    ],
+    metricLabels: ['Estensione gamba', 'Fase'],
+    muscles: { visual:['core','hips'], text:['Lombari','Glutei','Stabilizzatori del core'] },
+    // Misura deliberatamente solo l'estensione della gamba (angolo anca-
+    // ginocchio-caviglia), non il braccio opposto né l'allineamento della
+    // schiena: da un'unica fotocamera laterale fissa, il lato che si estende
+    // lontano dall'obiettivo è spesso parzialmente nascosto dal corpo, quindi
+    // pretendere di validare tutto il movimento (braccio incluso, simmetria
+    // sinistra/destra) darebbe un dato inaffidabile spacciato per preciso —
+    // meglio misurare bene una cosa sola che misurarne male diverse. Per lo
+    // stesso motivo non è nell'elenco degli esercizi con analisi di simmetria.
+    thresholds: { kneeTuckedMax: 110, kneeEnter: 130, kneeTargetMin: 155 },
+    calib: {
+      steps: [
+        { prompt: "A carponi, ginocchia sotto le anche, di lato alla fotocamera.",
+          sample(lm){ const s = pickSide3D(lm); return { knee: angleBetween(s.hip, s.knee, s.ankle) }; } },
+        { prompt: "Estendi una gamba all'indietro il più possibile e resta fermo.",
+          sample(lm){ const s = pickSide3D(lm); return { knee: angleBetween(s.hip, s.knee, s.ankle) }; } }
+      ],
+      apply(vals, t){
+        const tuckedAngle = Math.min(vals[0].knee, vals[1].knee);
+        const extendedAngle = Math.max(vals[0].knee, vals[1].knee);
+        if(extendedAngle - tuckedAngle < 25) return false;
+        t.kneeTuckedMax = Math.round(tuckedAngle + 10);
+        t.kneeEnter = Math.round((tuckedAngle + extendedAngle) / 2);
+        t.kneeTargetMin = Math.max(t.kneeEnter + 10, Math.round(extendedAngle - 10));
+        return true;
+      }
+    },
+    evaluate(lm){
+      const t = this.thresholds;
+      const s = pickSide3D(lm);
+      const kneeAngle = angleBetween(s.hip, s.knee, s.ankle);
+      if(kneeAngle == null) return null;
+
+      if(exState.phase === undefined){ exState.phase = 'tucked'; exState.reachedTarget = false; }
+      if(exState.phase === 'tucked' && kneeAngle > t.kneeEnter){
+        exState.phase = 'extended';
+        exState.reachedTarget = false;
+        exState.phaseStart = performance.now();
+      } else if(exState.phase === 'extended'){
+        if(!exState.reachedTarget && kneeAngle >= t.kneeTargetMin) exState.reachedTarget = true;
+        if(kneeAngle < t.kneeTuckedMax){
+          exState.phase = 'tucked';
+          const tooFast = repTooFast(exState.phaseStart);
+          let invalidParts;
+          if(tooFast) invalidParts = 'Movimento troppo rapido o instabile: ripetizione non conteggiata.';
+          else if(!exState.reachedTarget) invalidParts = rejectRepSequence('Estendi di più la gamba all\'indietro, fino a essere in linea con la schiena.');
+          completeRep(tooFast || !exState.reachedTarget, invalidParts, 'Buona estensione della gamba.');
+        }
+      }
+
+      return {
+        ok: exState.phase === 'tucked' || exState.reachedTarget,
+        statusMsg: exState.phase === 'extended' ? (exState.reachedTarget ? 'Gamba estesa — forma corretta' : 'Estendi di più') : 'Posizione a carponi',
+        metrics: [
+          { value: Math.round(kneeAngle) + '°', ok: exState.phase === 'extended' ? exState.reachedTarget : null },
+          { value: exState.phase === 'extended' ? 'Estesa' : 'Raccolta', ok: null }
+        ]
+      };
+    }
   }
 };
 
@@ -4408,7 +4749,8 @@ const EXERCISE_ICONS = {
   squat: '🏋️', lunge: '🚶', pushup: '💪', plank: '🪵',
   sideplank: '🤸', glutebridge: '🌉', jumpingjack: '🙆', mountainclimber: '⛰️',
   burpee: '⚡', crunch: '🌀', legraise: '🦵', russiantwist: '🌪️',
-  bicyclecrunch: '🚴', highknees: '🏃', wallsit: '🪑', chairdip: '⬇️'
+  bicyclecrunch: '🚴', highknees: '🏃', wallsit: '🪑', chairdip: '⬇️',
+  calfraise: '🦶', sidelunge: '↔️', superman: '🦸', birddog: '🐕'
 };
 
 // --- persistenza soglie personalizzate ---
