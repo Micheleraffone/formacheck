@@ -931,6 +931,8 @@
     </div>
     <div class="calib-overlay" id="historyOverlay" style="display:none;">
       <div class="calib-title">Cronologia allenamenti</div>
+
+      <!-- Sempre visibile: lo stato essenziale a colpo d'occhio, senza dover aprire nulla. -->
       <div id="goalPanel" style="width:100%; max-width:340px; display:flex; flex-direction:column; gap:8px; align-items:center;">
         <div id="deloadBadge" class="calib-status-note" style="display:none; width:100%; box-sizing:border-box;" title="Combina tre segnali già misurati altrove nell'app — carico di allenamento (ACWR), benessere percepito (Hooper Index) e andamento della velocità di esecuzione (VBT) nelle ultime sessioni — invece di un singolo numero, perché ciascun segnale preso da solo può dare falsi allarmi. Regole trasparenti, non un modello addestrato: più segnali in stato di allerta insieme, più la raccomandazione di scarico è forte."></div>
         <div id="streakBadge" style="font-family:'Manrope', sans-serif; font-weight:700; font-size:15px;">🔥 0 giorni di fila</div>
@@ -940,20 +942,34 @@
         </div>
         <div class="calib-progress" style="width:220px;"><div class="calib-progress-bar" id="goalProgressBar"></div></div>
         <div id="goalProgressLabel" style="font-size:11.5px; color:var(--ink-dim);"></div>
+      </div>
 
-        <button class="btn" id="reminderToggleBtn" style="width:100%; max-width:280px;">🔔 Promemoria disattivati — tocca per attivare</button>
-        <div class="calib-status-note" id="reminderHint" style="display:none; width:100%; max-width:280px; box-sizing:border-box; text-align:left;"></div>
+      <div class="settings-group" style="width:100%; max-width:340px;">
+        <button class="settings-group-toggle" id="goalExtrasToggle" aria-expanded="false">
+          <span>🔔 Promemoria, peso e carico</span>
+          <span class="settings-group-chevron" id="goalExtrasChevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="settings-group-body" id="goalExtrasBody" hidden style="align-items:center;">
+          <button class="btn" id="reminderToggleBtn" style="width:100%;">🔔 Promemoria disattivati — tocca per attivare</button>
+          <div class="calib-status-note" id="reminderHint" style="display:none; text-align:left;"></div>
 
-        <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-dim);">
-          <span>Peso corporeo, per stimare le calorie</span>
-          <input type="number" id="bodyWeightInput" min="30" max="250" placeholder="70" aria-label="Peso corporeo in chilogrammi, per stimare le calorie" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
-          <span>kg</span>
+          <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-dim); justify-content:center;">
+            <span>Peso corporeo, per stimare le calorie</span>
+            <input type="number" id="bodyWeightInput" min="30" max="250" placeholder="70" aria-label="Peso corporeo in chilogrammi, per stimare le calorie" style="width:52px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
+            <span>kg</span>
+          </div>
+          <div id="caloriesTotalBadge" class="calib-status-note" style="display:none;"></div>
+          <div id="acwrBadge" class="calib-status-note" style="display:none;" title="Rapporto tra il carico di allenamento dell'ultima settimana e la media delle ultime 4 settimane (Acute:Chronic Workload Ratio). Zona 0.8-1.3: aumento di carico prudente. Sopra 1.5: la letteratura sportiva associa un salto così rapido a un rischio di infortunio maggiore. Richiede di aver valutato lo sforzo (RPE) di almeno qualche sessione."></div>
         </div>
-        <div id="caloriesTotalBadge" class="calib-status-note" style="display:none;"></div>
-        <div id="acwrBadge" class="calib-status-note" style="display:none;" title="Rapporto tra il carico di allenamento dell'ultima settimana e la media delle ultime 4 settimane (Acute:Chronic Workload Ratio). Zona 0.8-1.3: aumento di carico prudente. Sopra 1.5: la letteratura sportiva associa un salto così rapido a un rischio di infortunio maggiore. Richiede di aver valutato lo sforzo (RPE) di almeno qualche sessione."></div>
+      </div>
 
-        <div id="wellnessSection" style="width:100%; max-width:300px; display:flex; flex-direction:column; gap:8px; align-items:center; padding-top:10px; margin-top:2px; border-top:1px solid var(--line);">
-          <div class="section-label">Benessere di oggi (Hooper Index) — 1 ottimo, 7 pessimo</div>
+      <div class="settings-group" style="width:100%; max-width:300px;">
+        <button class="settings-group-toggle" id="wellnessToggle" aria-expanded="false">
+          <span>❤️ Benessere di oggi (Hooper Index)</span>
+          <span class="settings-group-chevron" id="wellnessChevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="settings-group-body" id="wellnessSection" hidden style="align-items:center;">
+          <div class="calib-hint" style="margin:0;">1 ottimo, 7 pessimo.</div>
           <div style="display:grid; grid-template-columns:1fr auto; gap:6px 10px; width:100%; font-size:12px; color:var(--ink-dim); align-items:center;">
             <span>Affaticamento</span>
             <input type="number" id="wellnessFatigue" min="1" max="7" value="4" aria-label="Affaticamento, da 1 (ottimo) a 7 (pessimo)" style="width:48px; background:var(--panel-3); border:1px solid var(--line); color:var(--ink); border-radius:var(--radius-sm); padding:5px; text-align:center; font-family:'Manrope', sans-serif;">
@@ -968,6 +984,7 @@
           <div class="calib-status-note" id="wellnessBadge" style="display:none;"></div>
         </div>
       </div>
+
       <div class="history-period-tabs" id="historyPeriodTabs" role="group" aria-label="Periodo del grafico">
         <button class="history-period-tab" id="historyPeriodW2" data-period="w2" type="button">14 giorni</button>
         <button class="history-period-tab" id="historyPeriodM3" data-period="m3" type="button">3 mesi</button>
@@ -981,14 +998,21 @@
       <div class="history-chart-note" id="historyChartInsight" style="width:100%; max-width:340px;"></div>
       <div class="history-chart-note" id="historyChartRecord" style="width:100%; max-width:340px;"></div>
 
-      <div style="width:100%; max-width:340px; display:flex; flex-direction:column; gap:6px; padding-top:10px; margin-top:2px; border-top:1px solid var(--line);">
-        <div class="section-label" title="Confronta la profondità/ampiezza raggiunta dal lato sinistro e destro del corpo — lo stesso tipo di analisi (Limb Symmetry Index) usato nella riabilitazione sportiva dopo un infortunio. Richiede un esercizio dove entrambi i lati sono confrontabili (vista frontale, o gambe alternate) e almeno 3 ripetizioni valide per lato in una sessione.">🦵 Simmetria sinistra/destra</div>
-        <div id="symmetryPanel" class="symmetry-panel"></div>
-      </div>
-
-      <div style="width:100%; max-width:340px; display:flex; flex-direction:column; gap:6px; padding-top:10px; margin-top:2px; border-top:1px solid var(--line);">
-        <div class="section-label" title="Quanto tempo attivo ha coinvolto ciascuna zona nel periodo selezionato sopra (stesse schede 14 giorni / 3 mesi / 12 mesi del grafico). Un esercizio che lavora più zone insieme (es. lo squat: gambe, glutei, core) conta per intero su ognuna, non diviso tra loro: è un indicatore di quanto una zona è stata sollecitata, non una stima anatomica precisa.">🧭 Statistiche per zona muscolare</div>
-        <div id="muscleZonePanel" class="musclezone-panel"></div>
+      <div class="settings-group" style="width:100%; max-width:340px;">
+        <button class="settings-group-toggle" id="advancedAnalysisToggle" aria-expanded="false">
+          <span>🔬 Analisi avanzata</span>
+          <span class="settings-group-chevron" id="advancedAnalysisChevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="settings-group-body" id="advancedAnalysisBody" hidden>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <div class="section-label" title="Confronta la profondità/ampiezza raggiunta dal lato sinistro e destro del corpo — lo stesso tipo di analisi (Limb Symmetry Index) usato nella riabilitazione sportiva dopo un infortunio. Richiede un esercizio dove entrambi i lati sono confrontabili (vista frontale, o gambe alternate) e almeno 3 ripetizioni valide per lato in una sessione.">🦵 Simmetria sinistra/destra</div>
+            <div id="symmetryPanel" class="symmetry-panel"></div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <div class="section-label" title="Quanto tempo attivo ha coinvolto ciascuna zona nel periodo selezionato sopra (stesse schede 14 giorni / 3 mesi / 12 mesi del grafico). Un esercizio che lavora più zone insieme (es. lo squat: gambe, glutei, core) conta per intero su ognuna, non diviso tra loro: è un indicatore di quanto una zona è stata sollecitata, non una stima anatomica precisa.">🧭 Statistiche per zona muscolare</div>
+            <div id="muscleZonePanel" class="musclezone-panel"></div>
+          </div>
+        </div>
       </div>
 
       <div id="historyList" style="width:100%; max-width:340px; max-height:36vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
@@ -1185,7 +1209,20 @@
       <button class="btn primary" id="startBtn">Avvia fotocamera</button>
       <button class="btn" id="resetBtn" disabled>Azzera</button>
     </div>
-    <button class="btn" id="warmupBtn" style="width:100%;" title="Una breve sequenza di mobilità guidata a voce, mirata sui gruppi muscolari dell'esercizio scelto, prima di iniziare a freddo.">🔥 Riscaldamento guidato</button>
+
+    <div class="settings-group">
+      <button class="settings-group-toggle" id="prepToggle" aria-expanded="false">
+        <span>🤸 Prima di allenarti</span>
+        <span class="settings-group-chevron" id="prepChevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="settings-group-body" id="prepBody" hidden>
+        <button class="btn" id="warmupBtn" style="width:100%;" title="Una breve sequenza di mobilità guidata a voce, mirata sui gruppi muscolari dell'esercizio scelto, prima di iniziare a freddo.">🔥 Riscaldamento guidato</button>
+        <button class="btn" id="reactionTestBtn" style="width:100%;" title="Test del tempo di reazione: un protocollo reale usato nel ritorno allo sport dopo infortunio e nell'allenamento neuromuscolare. Serve la fotocamera già avviata.">⏱️ Test tempo di reazione</button>
+        <div class="calib-status-note" id="reactionTestHint">Misura quanto ci metti a reagire a uno stimolo a comparsa casuale: lo stesso tipo di test usato nel ritorno allo sport dopo un infortunio, per valutare la prontezza neuromuscolare. Serve la fotocamera già avviata.</div>
+        <button class="btn" id="postureCheckBtn" style="width:100%;" title="Screening informale di livello spalle, livello bacino e allineamento laterale busto-bacino, in piedi frontale alla fotocamera per pochi secondi. Serve la fotocamera già avviata.">🧍 Check-up posturale</button>
+        <div class="calib-status-note" id="postureCheckHint">Uno screening rapido e informale — non una valutazione clinica — di livello spalle, livello bacino e allineamento laterale, in piedi frontale alla fotocamera per pochi secondi. Serve la fotocamera già avviata.</div>
+      </div>
+    </div>
 
     <div class="settings-group">
       <button class="settings-group-toggle" id="advancedTrainingToggle" aria-expanded="false">
@@ -1251,10 +1288,6 @@
       </button>
       <div class="settings-group-body" id="historyDataBody" hidden>
         <button class="btn" id="historyBtn" style="width:100%;">📊 Cronologia allenamenti</button>
-        <button class="btn" id="reactionTestBtn" style="width:100%;" title="Test del tempo di reazione: un protocollo reale usato nel ritorno allo sport dopo infortunio e nell'allenamento neuromuscolare. Serve la fotocamera già avviata.">⏱️ Test tempo di reazione</button>
-        <div class="calib-status-note" id="reactionTestHint">Misura quanto ci metti a reagire a uno stimolo a comparsa casuale: lo stesso tipo di test usato nel ritorno allo sport dopo un infortunio, per valutare la prontezza neuromuscolare. Serve la fotocamera già avviata.</div>
-        <button class="btn" id="postureCheckBtn" style="width:100%;" title="Screening informale di livello spalle, livello bacino e allineamento laterale busto-bacino, in piedi frontale alla fotocamera per pochi secondi. Serve la fotocamera già avviata.">🧍 Check-up posturale</button>
-        <div class="calib-status-note" id="postureCheckHint">Uno screening rapido e informale — non una valutazione clinica — di livello spalle, livello bacino e allineamento laterale, in piedi frontale alla fotocamera per pochi secondi. Serve la fotocamera già avviata.</div>
 
         <div>
           <div class="section-label">Backup dati</div>
@@ -6617,9 +6650,21 @@ function wireSettingsGroup(toggleId, bodyId, storageKey, defaultExpanded){
     try{ localStorage.setItem(storageKey, expanded ? '1' : '0'); } catch(e){ /* storage non disponibile */ }
   });
 }
+// Aperto di default (a differenza degli altri gruppi): il riscaldamento era
+// sempre visibile prima di finire in questo gruppo, e nasconderlo dietro un
+// tocco in più andrebbe contro il motivo per cui esiste — un promemoria
+// pronto all'uso appena prima di iniziare, non un'opzione da riscoprire.
+wireSettingsGroup('prepToggle', 'prepBody', 'formacheck_group_prep_v1', true);
 wireSettingsGroup('advancedTrainingToggle', 'advancedTrainingBody', 'formacheck_group_advanced_v1', apreEnabled || clusterEnabled || periodizationEnabled);
 wireSettingsGroup('voiceAccessibilityToggle', 'voiceAccessibilityBody', 'formacheck_group_voice_v1', captionsEnabled || voiceCommandEnabled);
 wireSettingsGroup('historyDataToggle', 'historyDataBody', 'formacheck_group_history_v1', false);
+// Aperto di default se il promemoria è già attivo, così resta a portata di
+// mano invece di sparire dietro un tocco in più proprio mentre lo si usa.
+wireSettingsGroup('goalExtrasToggle', 'goalExtrasBody', 'formacheck_group_goalextras_v1', reminderEnabled);
+// Aperto di default finché il benessere di oggi non è ancora stato
+// registrato (un piccolo invito a farlo), chiuso una volta compilato.
+wireSettingsGroup('wellnessToggle', 'wellnessSection', 'formacheck_group_wellness_v1', !loadWellness()[todayKey()]);
+wireSettingsGroup('advancedAnalysisToggle', 'advancedAnalysisBody', 'formacheck_group_advanalysis_v1', false);
 
 function resetMetrics(){
   logSessionIfActive();
