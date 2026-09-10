@@ -1092,6 +1092,23 @@
   </div>
 
   <div class="panel">
+    <!-- Subito sotto l'inquadratura, prima di tutto il resto (piano
+         suggerito, modalità, scelta esercizio...): l'avvio della fotocamera
+         è la prima cosa che serve fare, non qualcosa da scovare scorrendo
+         in fondo alla pagina e poi risalire per vedere l'inquadratura. -->
+    <div>
+      <div class="section-label">Fotocamera</div>
+      <div class="cam-select">
+        <button class="cam-btn" data-facing="user">Anteriore</button>
+        <button class="cam-btn active" data-facing="environment">Posteriore</button>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn primary" id="startBtn">Avvia fotocamera</button>
+      <button class="btn" id="resetBtn" disabled>Azzera</button>
+    </div>
+
     <div class="plan-card" id="planCard" style="display:none;">
       <div class="plan-card-header">
         <span class="plan-card-title">📋 Piano di oggi</span>
@@ -1213,19 +1230,6 @@
     </div>
 
     <div class="calib-status-note" id="circuitProgressNote" style="display:none;"></div>
-
-    <div>
-      <div class="section-label">Fotocamera</div>
-      <div class="cam-select">
-        <button class="cam-btn" data-facing="user">Anteriore</button>
-        <button class="cam-btn active" data-facing="environment">Posteriore</button>
-      </div>
-    </div>
-
-    <div class="controls">
-      <button class="btn primary" id="startBtn">Avvia fotocamera</button>
-      <button class="btn" id="resetBtn" disabled>Azzera</button>
-    </div>
 
     <div class="settings-group">
       <button class="settings-group-toggle" id="prepToggle" aria-expanded="false">
@@ -1645,6 +1649,7 @@ themeToggleBtn.addEventListener('click', () => {
 // --- guida introduttiva: ricompare a ogni apertura dell'app, sempre saltabile ---
 const ONBOARDING_STEPS = [
   { title: 'Benvenuto in FormaCheck 👋', text: 'Ti aiuta a correggere la forma dei tuoi esercizi a corpo libero in tempo reale, usando solo la fotocamera del telefono.' },
+  { title: '🔒 La tua privacy', text: 'Il rilevamento avviene interamente sul tuo telefono: il video della fotocamera non viene mai inviato a un server, né salvato da nessuna parte. Cronologia, soglie calibrate e impostazioni restano solo su questo dispositivo.' },
   { title: 'Scegli un esercizio', text: 'Seleziona un esercizio dalla lista (o crea un circuito), poi tocca "Avvia fotocamera". Trovi i passaggi di ogni esercizio in "Come si esegue".' },
   { title: 'Calibrazione', text: "Posizionati come indicato a schermo e resta fermo un attimo: l'app calibra il rilevamento sul tuo corpo prima di iniziare a contare." },
   { title: 'Solo le ripetizioni corrette contano', text: 'Se la forma non è corretta la ripetizione non viene conteggiata, e ricevi subito un avviso vocale su cosa correggere.' },
